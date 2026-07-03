@@ -78,9 +78,38 @@ jobs:
         shell: pwsh
         run: |
           Get-Command powershell
-          Get-Command trusted-signing-cli
-          Test-Path scripts/sign-windows.ps1
-          Test-Path src-tauri/scripts/sign-windows.ps1
+          Get-Command artifact-signing-cli
+
+          $azureCli = Get-Command az.cmd -ErrorAction SilentlyContinue
+          if (-not $azureCli) {
+            $azureCli = Get-Command az -ErrorAction SilentlyContinue
+          }
+          if (-not $azureCli) {
+            throw "Azure CLI was not found on PATH."
+          }
+
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\x64\\signtool\.exe$" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) {
+            $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
+          }
+          if (-not $signtool) {
+            throw "signtool.exe was not found."
+          }
+
+          if (-not (Test-Path scripts/sign-windows.ps1)) {
+            throw "scripts/sign-windows.ps1 was not found."
+          }
+          if (-not (Test-Path src-tauri/scripts/sign-windows.ps1)) {
+            throw "src-tauri/scripts/sign-windows.ps1 was not found."
+          }
+
+          "AZURE_CLI_PATH=$($azureCli.Source)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SIGNTOOL_PATH=$($signtool.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Using Azure CLI: $($azureCli.Source)"
+          Write-Host "Using signtool: $($signtool.FullName)"
 
       - name: Install frontend dependencies
         run: npm ci
