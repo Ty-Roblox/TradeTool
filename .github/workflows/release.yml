@@ -73,6 +73,15 @@ jobs:
         if: matrix.platform == 'windows-latest'
         run: cargo install artifact-signing-cli --locked
 
+      - name: Verify Windows signing toolchain
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          Get-Command powershell
+          Get-Command trusted-signing-cli
+          Test-Path scripts/sign-windows.ps1
+          Test-Path src-tauri/scripts/sign-windows.ps1
+
       - name: Install frontend dependencies
         run: npm ci
 

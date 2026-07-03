@@ -24,18 +24,23 @@ if (-not (Test-Path -LiteralPath $FilePath)) {
     throw "File to sign does not exist: $FilePath"
 }
 
+$resolvedFile = (Resolve-Path -LiteralPath $FilePath).Path
+Write-Host "Signing Windows artifact: $resolvedFile"
+
 $trustedSigningCli = Get-Command trusted-signing-cli -ErrorAction SilentlyContinue
 if (-not $trustedSigningCli) {
     throw "trusted-signing-cli was not found on PATH. Install it with: cargo install artifact-signing-cli"
 }
+
+Write-Host "Using trusted-signing-cli: $($trustedSigningCli.Source)"
 
 & $trustedSigningCli.Source `
     -e $env:AZURE_ARTIFACT_SIGNING_ENDPOINT `
     -a $env:AZURE_ARTIFACT_SIGNING_ACCOUNT `
     -c $env:AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE `
     -d "TradeProject" `
-    $FilePath
+    $resolvedFile
 
 if ($LASTEXITCODE -ne 0) {
-    throw "Azure Artifact Signing failed for $FilePath with exit code $LASTEXITCODE"
+    throw "Azure Artifact Signing failed for $resolvedFile with exit code $LASTEXITCODE"
 }
