@@ -12,5 +12,6 @@ node_modules
 *.key
 *.key.pub
 *.sig
+.release-test/
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
