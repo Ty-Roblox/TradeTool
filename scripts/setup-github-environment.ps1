@@ -32,14 +32,7 @@ function Set-GitHubSecret {
         [string]$Value
     )
 
-    $tempFile = New-TemporaryFile
-    try {
-        Set-Content -LiteralPath $tempFile -Value $Value -NoNewline
-        gh secret set $Name --repo $Repo --body-file $tempFile
-    }
-    finally {
-        Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
-    }
+    $Value | gh secret set $Name --repo $Repo
 }
 
 function Set-GitHubVariable {
@@ -57,7 +50,7 @@ if (-not (Test-Path -LiteralPath $TauriPrivateKeyPath)) {
     throw "Tauri signing private key was not found: $TauriPrivateKeyPath"
 }
 
-gh secret set TAURI_SIGNING_PRIVATE_KEY --repo $Repo --body-file $TauriPrivateKeyPath
+Get-Content -Raw -LiteralPath $TauriPrivateKeyPath | gh secret set TAURI_SIGNING_PRIVATE_KEY --repo $Repo
 
 $tauriPrivateKeyPassword = [Environment]::GetEnvironmentVariable("TAURI_SIGNING_PRIVATE_KEY_PASSWORD", "Process")
 if (-not $tauriPrivateKeyPassword) {
