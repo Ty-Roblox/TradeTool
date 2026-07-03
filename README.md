@@ -32,6 +32,12 @@ GitHub Actions expects these repository variables:
 - `AZURE_ARTIFACT_SIGNING_ACCOUNT`
 - `AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE`
 
-The updater endpoint is `https://github.com/Ty-Roblox/TradeProject/releases/latest/download/latest.json`. Update `src-tauri/tauri.conf.json` before the first release if the final GitHub repository changes.
+After authenticating GitHub CLI and exporting the Azure values above, run:
+
+```powershell
+.\scripts\setup-github-environment.ps1
+```
+
+The updater endpoint is `https://github.com/Ty-Roblox/TradeTool/releases/latest/download/latest.json`.
 
 Release builds are triggered manually or by pushing an `app-v*` tag. Releases are created as drafts.
