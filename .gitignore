@@ -1,5 +1,6 @@
 .DS_Store
 .serena/
+README.md
 node_modules
 /build
 /.svelte-kit
