@@ -1,0 +1,15 @@
+.DS_Store
+.serena/
+node_modules
+/build
+/.svelte-kit
+/package
+/src-tauri/target
+.env
+.env.*
+!.env.example
+*.key
+*.key.pub
+*.sig
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
