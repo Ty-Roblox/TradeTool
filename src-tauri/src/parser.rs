@@ -119,7 +119,7 @@ fn identity_lines(header: &[String]) -> Vec<String> {
 
 fn identity_from_lines(rarity: Option<&str>, lines: &[String]) -> (Option<String>, Option<String>) {
     match (rarity, lines) {
-        (Some("Rare" | "Magic"), [item_name, base_type, ..]) => {
+        (Some("Rare" | "Magic" | "Unique"), [item_name, base_type, ..]) => {
             (Some(item_name.clone()), Some(base_type.clone()))
         }
         (_, [base_type, ..]) => (None, Some(base_type.clone())),
@@ -170,6 +170,18 @@ Item Level: 72
 +29% to Lightning Resistance
 15% increased Stun Threshold";
 
+    const UNIQUE_HELMET: &str = "Item Class: Helmets
+Rarity: Unique
+Crown of the Pale King
+Cultist Crown
+--------
+Quality: +20%
+--------
+Item Level: 84
+--------
+Allies in your Presence have 10% increased Attack Speed (rune)
+50(50-75)% increased Spirit";
+
     #[test]
     fn parses_rare_gear_identity_properties_and_explicit_mods() {
         let item = parse_item_text(RARE_BODY_ARMOUR).expect("rare body armour should parse");
@@ -183,5 +195,14 @@ Item Level: 72
         assert_eq!(item.sockets.as_deref(), Some("S S"));
         assert!(item.explicit_mods.iter().any(|modifier| modifier.text == "+78 to maximum Life"));
         assert!(item.explicit_mods.iter().any(|modifier| modifier.text == "+34% to Fire Resistance"));
+    }
+
+    #[test]
+    fn parses_unique_identity_as_name_and_base_type() {
+        let item = parse_item_text(UNIQUE_HELMET).expect("unique helmet should parse");
+
+        assert_eq!(item.rarity.as_deref(), Some("Unique"));
+        assert_eq!(item.item_name.as_deref(), Some("Crown of the Pale King"));
+        assert_eq!(item.base_type.as_deref(), Some("Cultist Crown"));
     }
 }

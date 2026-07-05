@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 const TRADE_BASE_URL: &str = "https://www.pathofexile.com";
 const FETCH_PAGE_SIZE: usize = 10;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TradeFilterSpec {
     pub id: String,
     pub label: String,
@@ -18,10 +18,10 @@ pub struct TradeFilterSpec {
     kind: TradeFilterKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum TradeFilterKind {
     Category(String),
-    Stat { stat_id: String, value: i64 },
+    Stat { stat_id: String, value: f64 },
 }
 
 pub fn trade_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
@@ -69,7 +69,7 @@ pub fn build_trade_query(item: &CapturedItem, selected_filter_ids: &[String]) ->
             TradeFilterKind::Stat { stat_id, value } => Some(json!({
                 "id": stat_id,
                 "disabled": false,
-                "value": { "min": value }
+                "value": { "min": stat_value_json(*value) }
             })),
             TradeFilterKind::Category(_) => None,
         })
@@ -342,7 +342,7 @@ pub fn is_blocked_or_rate_limited(status: u16) -> bool {
 
 fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
     let mut keyed_specs = Vec::new();
-    let mut elemental_resistance_total = 0;
+    let mut elemental_resistance_total = 0.0;
     let mut first_resistance_index = None;
 
     for modifier in &item.explicit_mods {
@@ -353,7 +353,7 @@ fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
                 modifier.index,
                 TradeFilterSpec {
                     id: format!("stat:explicit.stat_4052037485:{}", modifier.index),
-                    label: format!("Maximum Energy Shield: {value}+"),
+                    label: format!("Maximum Energy Shield: {}+", format_filter_value(value)),
                     selected_by_default: true,
                     source_modifier_index: Some(modifier.index),
                     kind: TradeFilterKind::Stat {
@@ -367,7 +367,7 @@ fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
                 modifier.index,
                 TradeFilterSpec {
                     id: format!("stat:explicit.stat_4015621042:{}", modifier.index),
-                    label: format!("Increased Energy Shield: {value}%+"),
+                    label: format!("Increased Energy Shield: {}%+", format_filter_value(value)),
                     selected_by_default: true,
                     source_modifier_index: Some(modifier.index),
                     kind: TradeFilterKind::Stat {
@@ -383,7 +383,7 @@ fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
                 modifier.index,
                 TradeFilterSpec {
                     id: format!("stat:explicit.stat_3917489142:{}", modifier.index),
-                    label: format!("Rarity of Items: {value}%+"),
+                    label: format!("Rarity of Items: {}%+", format_filter_value(value)),
                     selected_by_default: true,
                     source_modifier_index: Some(modifier.index),
                     kind: TradeFilterKind::Stat {
@@ -397,7 +397,7 @@ fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
                 modifier.index,
                 TradeFilterSpec {
                     id: format!("stat:explicit.stat_915769802:{}", modifier.index),
-                    label: format!("Stun Threshold: {value}+"),
+                    label: format!("Stun Threshold: {}+", format_filter_value(value)),
                     selected_by_default: true,
                     source_modifier_index: Some(modifier.index),
                     kind: TradeFilterKind::Stat {
@@ -406,22 +406,36 @@ fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
                     },
                 },
             ));
+        } else if let Some((stat_id, label, value)) = mapped_general_stat(&text) {
+            keyed_specs.push((
+                modifier.index,
+                TradeFilterSpec {
+                    id: format!("stat:{stat_id}:{}", modifier.index),
+                    label,
+                    selected_by_default: true,
+                    source_modifier_index: Some(modifier.index),
+                    kind: TradeFilterKind::Stat { stat_id, value },
+                },
+            ));
         }
 
         if is_elemental_resistance_modifier(&text) {
-            if let Some(value) = parse_first_i64(&text) {
+            if let Some(value) = parse_first_number(&text) {
                 elemental_resistance_total += value;
                 first_resistance_index.get_or_insert(modifier.index);
             }
         }
     }
 
-    if elemental_resistance_total > 0 {
+    if elemental_resistance_total > 0.0 {
         keyed_specs.push((
             first_resistance_index.unwrap_or(usize::MAX),
             TradeFilterSpec {
                 id: "stat:pseudo.pseudo_total_elemental_resistance".to_string(),
-                label: format!("Total Elemental Resistance: {elemental_resistance_total}%+"),
+                label: format!(
+                    "Total Elemental Resistance: {}%+",
+                    format_filter_value(elemental_resistance_total)
+                ),
                 selected_by_default: true,
                 source_modifier_index: first_resistance_index,
                 kind: TradeFilterKind::Stat {
@@ -436,18 +450,94 @@ fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
     keyed_specs.into_iter().map(|(_, spec)| spec).collect()
 }
 
-fn mapped_explicit_stat_value(text: &str, marker: &str) -> Option<i64> {
-    text.contains(marker).then(|| parse_first_i64(text)).flatten()
+fn mapped_explicit_stat_value(text: &str, marker: &str) -> Option<f64> {
+    text.contains(marker).then(|| parse_first_number(text)).flatten()
 }
 
-fn parse_first_i64(value: &str) -> Option<i64> {
+fn mapped_general_stat(text: &str) -> Option<(String, String, f64)> {
+    if text.contains("Allies in your Presence have") && text.contains("increased Attack Speed") {
+        let value = parse_first_number(text)?;
+        let prefix = stat_source_prefix(text);
+        return Some((
+            format!("{prefix}.stat_1998951374"),
+            format!("Allies Attack Speed: {}%+", format_filter_value(value)),
+            value,
+        ));
+    }
+
+    if text.contains("increased Spirit") {
+        let value = parse_first_number(text)?;
+        let prefix = stat_source_prefix(text);
+        return Some((
+            format!("{prefix}.stat_3984865854"),
+            format!("Spirit: {}%+", format_filter_value(value)),
+            value,
+        ));
+    }
+
+    if text.contains("Allies in your Presence Regenerate") && text.contains("Life per second") {
+        let value = parse_first_number(text)?;
+        return Some((
+            "explicit.stat_4010677958".to_string(),
+            format!("Allies Life Regen: {}+", format_filter_value(value)),
+            value,
+        ));
+    }
+
+    if text.contains("to all Attributes") {
+        let value = parse_first_number(text)?;
+        let prefix = stat_source_prefix(text);
+        return Some((
+            format!("{prefix}.stat_1379411836"),
+            format!("All Attributes: {}+", format_filter_value(value)),
+            value,
+        ));
+    }
+
+    if text.contains("Companions deal") && text.contains("increased damage to your Marked targets") {
+        let value = parse_first_number(text)?;
+        return Some((
+            "explicit.stat_1067622524".to_string(),
+            format!("Companion Marked Damage: {}%+", format_filter_value(value)),
+            value,
+        ));
+    }
+
+    None
+}
+
+fn stat_source_prefix(text: &str) -> &'static str {
+    if text.contains("(rune)") {
+        "rune"
+    } else {
+        "explicit"
+    }
+}
+
+fn parse_first_number(value: &str) -> Option<f64> {
     let number = value
         .chars()
         .skip_while(|ch| !ch.is_ascii_digit() && *ch != '-')
-        .take_while(|ch| ch.is_ascii_digit() || *ch == '-')
+        .take_while(|ch| ch.is_ascii_digit() || *ch == '-' || *ch == '.')
         .collect::<String>();
 
     number.parse().ok()
+}
+
+fn stat_value_json(value: f64) -> Value {
+    if value.fract() == 0.0 {
+        json!(value as i64)
+    } else {
+        json!(value)
+    }
+}
+
+fn format_filter_value(value: f64) -> String {
+    if value.fract() == 0.0 {
+        (value as i64).to_string()
+    } else {
+        value.to_string()
+    }
 }
 
 fn is_elemental_resistance_modifier(text: &str) -> bool {
@@ -467,8 +557,8 @@ fn category_for_item_class(item_class: &str) -> Option<&'static str> {
         "boots" => Some("armour.boots"),
         "body armours" => Some("armour.chest"),
         "gloves" => Some("armour.gloves"),
-        "helmets" => Some("armour.helmets"),
-        "shields" => Some("armour.shields"),
+        "helmets" => Some("armour.helmet"),
+        "shields" => Some("armour.shield"),
         "amulets" => Some("accessory.amulet"),
         "rings" => Some("accessory.ring"),
         "belts" => Some("accessory.belt"),
@@ -589,6 +679,28 @@ Item Level: 72
 --------
 +78 to maximum Life";
 
+    const UNIQUE_HELMET: &str = "Item Class: Helmets
+Rarity: Unique
+Crown of the Pale King
+Cultist Crown
+--------
+Quality: +20%
+--------
+Item Level: 84
+--------
+Allies in your Presence have 10% increased Attack Speed (rune)
+{ Unique Modifier }
+50(50-75)% increased Spirit
+{ Unique Modifier — Life }
+Allies in your Presence Regenerate 94.2(50-100) Life per second
+{ Unique Modifier — Attribute }
++6(6-12) to all Attributes
+{ Unique Modifier }
+Companions deal 97(50-100)% increased damage to your Marked targets
+{ Unique Modifier }
+You can have any number of Companions of different types — Unscalable Value
+Darkness howls through ancient bones, a wistful cry";
+
     #[test]
     fn query_builder_includes_only_selected_supported_filters() {
         let item = parse_item_text(RARE_BODY_ARMOUR).expect("item should parse");
@@ -653,6 +765,60 @@ Item Level: 72
                 ("explicit.stat_3917489142", 18),
                 ("pseudo.pseudo_total_elemental_resistance", 31),
                 ("explicit.stat_915769802", 101),
+            ]
+        );
+    }
+
+    #[test]
+    fn query_builder_uses_unique_base_type_not_unique_name() {
+        let item = parse_item_text(UNIQUE_HELMET).expect("unique helmet should parse");
+        let query = build_trade_query(&item, &["identity:type".to_string()]).expect("query should build");
+
+        assert_eq!(query["query"]["type"], "Cultist Crown");
+    }
+
+    #[test]
+    fn query_builder_maps_unique_ranged_and_rune_stats() {
+        let item = parse_item_text(UNIQUE_HELMET).expect("unique helmet should parse");
+        let query = build_trade_query(
+            &item,
+            &[
+                "category:armour.helmet".to_string(),
+                "stat:rune.stat_1998951374:0".to_string(),
+                "stat:explicit.stat_3984865854:2".to_string(),
+                "stat:explicit.stat_4010677958:4".to_string(),
+                "stat:explicit.stat_1379411836:6".to_string(),
+                "stat:explicit.stat_1067622524:8".to_string(),
+            ],
+        )
+        .expect("query should build");
+
+        assert_eq!(
+            query["query"]["filters"]["type_filters"]["filters"]["category"]["option"],
+            "armour.helmet"
+        );
+
+        let filters = query["query"]["stats"][0]["filters"]
+            .as_array()
+            .expect("stat filters");
+        let observed = filters
+            .iter()
+            .map(|filter| {
+                (
+                    filter["id"].as_str().expect("id"),
+                    filter["value"]["min"].as_f64().expect("min"),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            observed,
+            vec![
+                ("rune.stat_1998951374", 10.0),
+                ("explicit.stat_3984865854", 50.0),
+                ("explicit.stat_4010677958", 94.2),
+                ("explicit.stat_1379411836", 6.0),
+                ("explicit.stat_1067622524", 97.0),
             ]
         );
     }
