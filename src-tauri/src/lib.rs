@@ -21,18 +21,19 @@ fn capture_item_now(app: tauri::AppHandle) -> Result<models::CaptureResponse, St
 
 #[tauri::command]
 async fn search_trade(
-    app: tauri::AppHandle,
     request: models::SearchTradeRequest,
 ) -> Result<models::TradeSearchResponse, String> {
     let item = parser::parse_item_text(&request.raw_text)?;
-    let result = trade::search_trade(&request.league, &item, &request.selected_filter_ids).await?;
+    trade::search_trade(&request.league, &item, &request.selected_filter_ids).await
+}
 
+#[tauri::command]
+fn open_trade_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    let url = trade::validate_trade_url(&url)?;
     use tauri_plugin_opener::OpenerExt;
     app.opener()
-        .open_url(&result.url, None::<&str>)
-        .map_err(|error| format!("Trade search succeeded, but opening the result page failed: {error}"))?;
-
-    Ok(result)
+        .open_url(url, None::<&str>)
+        .map_err(|error| format!("Opening the trade result page failed: {error}"))
 }
 
 fn build_capture_response(raw_text: String) -> Result<models::CaptureResponse, String> {
@@ -89,7 +90,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             capture_item_now,
             parse_item_text,
-            search_trade
+            search_trade,
+            open_trade_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

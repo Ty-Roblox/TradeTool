@@ -51,11 +51,43 @@
   type TradeSearchResponse = {
     url: string;
     searchId: string;
+    total: number;
+    resultIds: string[];
+    fetchedCount: number;
+    listings: TradeListing[];
+    fetchUrl?: string;
+    warning?: string;
   };
 
-  let league = $state("Standard");
+  type TradeListing = {
+    id: string;
+    indexed?: string;
+    price?: TradePrice;
+    accountName?: string;
+    item: TradeListingItem;
+  };
+
+  type TradePrice = {
+    priceType?: string;
+    amount: number;
+    currency: string;
+  };
+
+  type TradeListingItem = {
+    icon?: string;
+    name?: string;
+    typeLine?: string;
+    baseType?: string;
+    rarity?: string;
+    itemLevel?: number;
+    explicitMods: string[];
+    pseudoMods: string[];
+  };
+
+  let league = $state("Runes of Aldur");
   let rawText = $state("");
   let capture = $state<CaptureResponse | null>(null);
+  let tradeResult = $state<TradeSearchResponse | null>(null);
   let selectedFilterIds = $state<string[]>([]);
   let captureStatus = $state("Ready");
   let captureError = $state("");
@@ -102,6 +134,7 @@
     captureError = "";
     searchStatus = "";
     searchError = "";
+    tradeResult = null;
   }
 
   async function captureNow() {
@@ -159,13 +192,27 @@
         }
       });
 
-      searchStatus = `Opened trade search ${result.searchId}.`;
+      tradeResult = result;
+      searchStatus = `Found ${result.total} listings. Showing ${result.fetchedCount}.`;
       localStorage.setItem("poe2TradeLeague", league);
     } catch (error) {
       searchStatus = "Search unavailable.";
       searchError = readableError(error);
     } finally {
       searching = false;
+    }
+  }
+
+  async function openOfficialSearch() {
+    if (!tradeResult) {
+      return;
+    }
+
+    try {
+      await invoke("open_trade_url", { url: tradeResult.url });
+      searchStatus = "Opened official trade search.";
+    } catch (error) {
+      searchError = readableError(error);
     }
   }
 
@@ -219,6 +266,32 @@
 
   function readableError(error: unknown) {
     return error instanceof Error ? error.message : String(error);
+  }
+
+  function formatPrice(price?: TradePrice) {
+    if (!price) {
+      return "No price";
+    }
+
+    const amount = Number.isInteger(price.amount)
+      ? String(price.amount)
+      : price.amount.toFixed(2).replace(/\.?0+$/, "");
+
+    return `${amount} ${price.currency}`;
+  }
+
+  function listingTitle(listing: TradeListing) {
+    return listing.item.name || listing.item.typeLine || listing.item.baseType || "Unknown item";
+  }
+
+  function listingSubtitle(listing: TradeListing) {
+    const parts = [
+      listing.item.typeLine,
+      listing.item.rarity,
+      listing.item.itemLevel ? `ilvl ${listing.item.itemLevel}` : ""
+    ].filter(Boolean);
+
+    return parts.join(" / ");
   }
 </script>
 
@@ -328,6 +401,16 @@
           >
             {searching ? "Searching..." : "Search Trade"}
           </button>
+          {#if tradeResult}
+            <button class="secondary-action" type="button" onclick={openOfficialSearch}>
+              Open Official Search
+            </button>
+          {/if}
+          {#if tradeResult?.warning}
+            <button class="secondary-action" type="button" onclick={searchTrade} disabled={searching}>
+              Retry
+            </button>
+          {/if}
           <span>{selectedFilterIds.length} selected</span>
         </div>
 
@@ -336,6 +419,75 @@
         {/if}
         {#if searchError}
           <p class="error">{searchError}</p>
+        {/if}
+
+        {#if tradeResult}
+          <section class="results-panel">
+            <div class="results-heading">
+              <div>
+                <h3>{tradeResult.total} matches</h3>
+                <p>{tradeResult.fetchedCount} listings loaded from the first page</p>
+              </div>
+              <span>{tradeResult.searchId}</span>
+            </div>
+
+            {#if tradeResult.warning}
+              <p class="warning">{tradeResult.warning}</p>
+            {/if}
+
+            {#if tradeResult.listings.length}
+              <div class="listing-list">
+                {#each tradeResult.listings as listing}
+                  <article class="listing-row">
+                    <div class="listing-image">
+                      {#if listing.item.icon}
+                        <img src={listing.item.icon} alt="" loading="lazy" />
+                      {:else}
+                        <span></span>
+                      {/if}
+                    </div>
+
+                    <div class="listing-body">
+                      <div class="listing-title">
+                        <div>
+                          <h4>{listingTitle(listing)}</h4>
+                          <p>{listingSubtitle(listing)}</p>
+                        </div>
+                        <strong>{formatPrice(listing.price)}</strong>
+                      </div>
+
+                      <div class="seller-line">
+                        <span>{listing.accountName ?? "Unknown seller"}</span>
+                        {#if listing.indexed}
+                          <span>{listing.indexed}</span>
+                        {/if}
+                      </div>
+
+                      {#if listing.item.pseudoMods.length}
+                        <div class="mod-list pseudo-mods">
+                          {#each listing.item.pseudoMods as mod}
+                            <span>{mod}</span>
+                          {/each}
+                        </div>
+                      {/if}
+
+                      {#if listing.item.explicitMods.length}
+                        <div class="mod-list">
+                          {#each listing.item.explicitMods as mod}
+                            <span>{mod}</span>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  </article>
+                {/each}
+              </div>
+            {:else}
+              <div class="results-empty">
+                <p>No listings were loaded in-app.</p>
+              </div>
+            {/if}
+          </section>
         {/if}
       {:else}
         <div class="empty-state">
@@ -581,6 +733,7 @@
   .actions {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 12px;
     margin-top: 18px;
   }
@@ -597,6 +750,133 @@
 
   .error.compact {
     font-size: 0.78rem;
+  }
+
+  .warning {
+    padding: 10px 12px;
+    border: 1px solid #e0c59e;
+    border-radius: 8px;
+    color: #714b1c;
+    background: #fff8e9;
+    line-height: 1.35;
+  }
+
+  .results-panel {
+    display: grid;
+    gap: 12px;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid #e0e6e1;
+  }
+
+  .results-heading {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .results-heading h3,
+  .listing-title h4 {
+    margin: 0;
+  }
+
+  .results-heading p,
+  .results-heading span,
+  .listing-title p,
+  .seller-line,
+  .results-empty {
+    color: #637069;
+    font-size: 0.82rem;
+  }
+
+  .listing-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .listing-row {
+    display: grid;
+    grid-template-columns: 74px 1fr;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid #dde5df;
+    border-radius: 8px;
+    background: #fbfcfa;
+  }
+
+  .listing-image {
+    display: grid;
+    width: 74px;
+    min-height: 74px;
+    place-items: center;
+    border: 1px solid #d8e0da;
+    border-radius: 8px;
+    background: #eef3ef;
+  }
+
+  .listing-image img {
+    max-width: 64px;
+    max-height: 64px;
+    object-fit: contain;
+  }
+
+  .listing-body {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .listing-title {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .listing-title h4 {
+    font-size: 0.95rem;
+    line-height: 1.25;
+  }
+
+  .listing-title strong {
+    flex: 0 0 auto;
+    padding: 4px 8px;
+    border-radius: 8px;
+    color: #fff;
+    background: #2d5f7a;
+    font-size: 0.86rem;
+  }
+
+  .seller-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+  }
+
+  .mod-list {
+    display: grid;
+    gap: 4px;
+    color: #27342f;
+    font-size: 0.82rem;
+    line-height: 1.35;
+  }
+
+  .mod-list span {
+    overflow-wrap: anywhere;
+  }
+
+  .pseudo-mods {
+    color: #2d5f7a;
+    font-weight: 700;
+  }
+
+  .results-empty {
+    display: grid;
+    min-height: 90px;
+    place-items: center;
+    border: 1px dashed #cad5ce;
+    border-radius: 8px;
   }
 
   .empty-state {
@@ -618,6 +898,24 @@
 
     .item-summary {
       grid-template-columns: repeat(2, minmax(120px, 1fr));
+    }
+
+    .listing-row {
+      grid-template-columns: 58px 1fr;
+    }
+
+    .listing-image {
+      width: 58px;
+      min-height: 58px;
+    }
+
+    .listing-image img {
+      max-width: 50px;
+      max-height: 50px;
+    }
+
+    .listing-title {
+      display: grid;
     }
   }
 </style>

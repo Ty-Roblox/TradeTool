@@ -68,5 +68,42 @@ pub struct SearchTradeRequest {
 pub struct TradeSearchResponse {
     pub url: String,
     pub search_id: String,
+    pub total: usize,
+    pub result_ids: Vec<String>,
+    pub fetched_count: usize,
+    pub listings: Vec<TradeListing>,
     pub query: serde_json::Value,
+    pub fetch_url: Option<String>,
+    pub warning: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TradeListing {
+    pub id: String,
+    pub indexed: Option<String>,
+    pub price: Option<TradePrice>,
+    pub account_name: Option<String>,
+    pub item: TradeListingItem,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TradePrice {
+    pub price_type: Option<String>,
+    pub amount: f64,
+    pub currency: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TradeListingItem {
+    pub icon: Option<String>,
+    pub name: Option<String>,
+    pub type_line: Option<String>,
+    pub base_type: Option<String>,
+    pub rarity: Option<String>,
+    pub item_level: Option<u32>,
+    pub explicit_mods: Vec<String>,
+    pub pseudo_mods: Vec<String>,
 }
