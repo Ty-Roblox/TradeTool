@@ -2,6 +2,7 @@ mod capture;
 mod filters;
 mod models;
 mod parser;
+mod stat_patterns;
 mod trade;
 
 use tauri::Emitter;
@@ -23,7 +24,11 @@ fn capture_item_now(app: tauri::AppHandle) -> Result<models::CaptureResponse, St
 async fn search_trade(
     request: models::SearchTradeRequest,
 ) -> Result<models::TradeSearchResponse, String> {
-    let item = parser::parse_item_text(&request.raw_text)?;
+    let item = match request.raw_text.as_deref().map(str::trim) {
+        Some(raw_text) if !raw_text.is_empty() => parser::parse_item_text(raw_text)?,
+        _ => models::CapturedItem::empty(),
+    };
+
     trade::search_trade(&request.league, &item, &request.selected_filter_ids).await
 }
 
@@ -39,11 +44,13 @@ fn open_trade_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
 fn build_capture_response(raw_text: String) -> Result<models::CaptureResponse, String> {
     let item = parser::parse_item_text(&raw_text)?;
     let filter_groups = filters::generate_filter_groups(&item);
+    let diagnostics = filters::generate_capture_diagnostics(&filter_groups);
 
     Ok(models::CaptureResponse {
         hotkey: capture::CAPTURE_HOTKEY.to_string(),
         item,
         filter_groups,
+        diagnostics,
     })
 }
 

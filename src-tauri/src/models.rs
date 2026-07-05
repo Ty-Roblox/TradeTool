@@ -15,6 +15,23 @@ pub struct CapturedItem {
     pub explicit_mods: Vec<ItemModifier>,
 }
 
+impl CapturedItem {
+    pub fn empty() -> Self {
+        Self {
+            raw_text: String::new(),
+            item_class: None,
+            rarity: None,
+            item_name: None,
+            base_type: None,
+            item_level: None,
+            quality: None,
+            sockets: None,
+            properties: Vec::new(),
+            explicit_mods: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemProperty {
@@ -47,19 +64,28 @@ pub struct FilterCandidate {
     pub unsupported_reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AppDiagnostic {
+    pub code: String,
+    pub message: String,
+    pub detail: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CaptureResponse {
     pub hotkey: String,
     pub item: CapturedItem,
     pub filter_groups: Vec<FilterGroup>,
+    pub diagnostics: Vec<AppDiagnostic>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchTradeRequest {
     pub league: String,
-    pub raw_text: String,
+    pub raw_text: Option<String>,
     pub selected_filter_ids: Vec<String>,
 }
 
@@ -75,6 +101,7 @@ pub struct TradeSearchResponse {
     pub query: serde_json::Value,
     pub fetch_url: Option<String>,
     pub warning: Option<String>,
+    pub diagnostics: Vec<AppDiagnostic>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

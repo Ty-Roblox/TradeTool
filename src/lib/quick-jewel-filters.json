@@ -1,0 +1,180 @@
+[
+  {
+    "id": "sapphire",
+    "label": "Sapphire",
+    "baseType": "Sapphire",
+    "stats": [
+      { "id": "explicit.stat_2482852589", "label": "#% increased maximum Energy Shield", "min": 15 },
+      { "id": "explicit.stat_2527686725", "label": "#% increased Magnitude of Shock you inflict", "min": 10 },
+      { "id": "explicit.stat_3556824919", "label": "#% increased Critical Damage Bonus", "min": 10 },
+      { "id": "explicit.stat_587431675", "label": "#% increased Critical Hit Chance", "min": 10 },
+      { "id": "explicit.stat_3489782002", "label": "# to maximum Energy Shield" },
+      { "id": "explicit.stat_1050105434", "label": "# to maximum Mana" },
+      { "id": "explicit.stat_2748665614", "label": "#% increased maximum Mana" },
+      { "id": "explicit.stat_789117908", "label": "#% increased Mana Regeneration Rate" },
+      { "id": "explicit.stat_2974417149", "label": "#% increased Spell Damage" },
+      { "id": "explicit.stat_2891184298", "label": "#% increased Cast Speed" },
+      { "id": "explicit.stat_3291658075", "label": "#% increased Cold Damage" },
+      { "id": "explicit.stat_2231156303", "label": "#% increased Lightning Damage" },
+      { "id": "explicit.stat_293638271", "label": "#% increased chance to Shock" },
+      { "id": "explicit.stat_473429811", "label": "#% increased Freeze Buildup" },
+      { "id": "explicit.stat_828179689", "label": "#% increased Magnitude of Chill you inflict" },
+      { "id": "explicit.stat_2901986750", "label": "#% to all Elemental Resistances" },
+      { "id": "explicit.stat_1604736568", "label": "Recover #% of maximum Mana on Kill (Jewel)" }
+    ]
+  },
+  {
+    "id": "ruby",
+    "label": "Ruby",
+    "baseType": "Ruby",
+    "stats": [
+      { "id": "explicit.stat_3299347043", "label": "# to maximum Life" },
+      { "id": "explicit.stat_983749596", "label": "#% increased maximum Life" },
+      { "id": "explicit.stat_3962278098", "label": "#% increased Fire Damage" },
+      { "id": "explicit.stat_3791899485", "label": "#% increased Ignite Magnitude" },
+      { "id": "explicit.stat_681332047", "label": "#% increased Attack Speed" },
+      { "id": "explicit.stat_1002362373", "label": "#% increased Melee Damage" },
+      { "id": "explicit.stat_239367161", "label": "#% increased Stun Buildup" },
+      { "id": "explicit.stat_915769802", "label": "# to Stun Threshold" },
+      { "id": "explicit.stat_680068163", "label": "#% increased Stun Threshold" },
+      { "id": "explicit.stat_3556824919", "label": "#% increased Critical Damage Bonus" },
+      { "id": "explicit.stat_2694482655", "label": "#% to Critical Damage Bonus" },
+      { "id": "explicit.stat_2901986750", "label": "#% to all Elemental Resistances" },
+      { "id": "explicit.stat_1181501418", "label": "# to Maximum Rage" },
+      { "id": "explicit.stat_2023107756", "label": "Recover #% of maximum Life on Kill" }
+    ]
+  },
+  {
+    "id": "emerald",
+    "label": "Emerald",
+    "baseType": "Emerald",
+    "stats": [
+      { "id": "explicit.stat_2106365538", "label": "#% increased Evasion Rating" },
+      { "id": "explicit.stat_2144192055", "label": "# to Evasion Rating" },
+      { "id": "explicit.stat_624954515", "label": "#% increased Accuracy Rating" },
+      { "id": "explicit.stat_803737631", "label": "# to Accuracy Rating" },
+      { "id": "explicit.stat_681332047", "label": "#% increased Attack Speed" },
+      { "id": "explicit.stat_3759663284", "label": "#% increased Projectile Speed" },
+      { "id": "explicit.stat_1839076647", "label": "#% increased Projectile Damage" },
+      { "id": "explicit.stat_4188894176", "label": "#% increased Damage with Bows" },
+      { "id": "explicit.stat_427684353", "label": "#% increased Damage with Crossbows" },
+      { "id": "explicit.stat_2487305362", "label": "#% increased Magnitude of Poison you inflict" },
+      { "id": "explicit.stat_795138349", "label": "#% chance to Poison on Hit" },
+      { "id": "explicit.stat_3166958180", "label": "#% increased Magnitude of Bleeding you inflict" },
+      { "id": "explicit.stat_2174054121", "label": "#% chance to inflict Bleeding on Hit" },
+      { "id": "explicit.stat_587431675", "label": "#% increased Critical Hit Chance" },
+      { "id": "explicit.stat_2901986750", "label": "#% to all Elemental Resistances" }
+    ]
+  },
+  {
+    "id": "diamond",
+    "label": "Diamond",
+    "baseType": "Diamond",
+    "stats": [
+      { "id": "explicit.stat_587431675", "label": "#% increased Critical Hit Chance" },
+      { "id": "explicit.stat_3556824919", "label": "#% increased Critical Damage Bonus" },
+      { "id": "explicit.stat_518292764", "label": "#% to Critical Hit Chance" },
+      { "id": "explicit.stat_2694482655", "label": "#% to Critical Damage Bonus" },
+      { "id": "explicit.stat_737908626", "label": "#% increased Critical Hit Chance for Spells" },
+      { "id": "explicit.stat_2194114101", "label": "#% increased Critical Hit Chance for Attacks" },
+      { "id": "explicit.stat_3714003708", "label": "#% increased Critical Damage Bonus for Attack Damage" },
+      { "id": "explicit.stat_274716455", "label": "#% increased Critical Spell Damage Bonus" },
+      { "id": "explicit.stat_2974417149", "label": "#% increased Spell Damage" },
+      { "id": "explicit.stat_2891184298", "label": "#% increased Cast Speed" },
+      { "id": "explicit.stat_681332047", "label": "#% increased Attack Speed" },
+      { "id": "explicit.stat_2901986750", "label": "#% to all Elemental Resistances" }
+    ]
+  },
+  {
+    "id": "time-lost-sapphire",
+    "label": "Time-Lost Sapphire",
+    "baseType": "Time-Lost Sapphire",
+    "stats": [
+      { "id": "explicit.stat_1060572482", "label": "#% increased Effect of Small Passive Skills in Radius" },
+      { "id": "explicit.stat_3665922113", "label": "Small Passive Skills in Radius also grant #% increased maximum Energy Shield" },
+      { "id": "explicit.stat_1137305356", "label": "Small Passive Skills in Radius also grant #% increased Spell Damage" },
+      { "id": "explicit.stat_2442527254", "label": "Small Passive Skills in Radius also grant #% increased Cold Damage" },
+      { "id": "explicit.stat_2768899959", "label": "Small Passive Skills in Radius also grant #% increased Lightning Damage" },
+      { "id": "explicit.stat_3256879910", "label": "Small Passive Skills in Radius also grant #% increased Mana Regeneration Rate" },
+      { "id": "explicit.stat_1552666713", "label": "Small Passive Skills in Radius also grant #% increased Energy Shield Recharge Rate" },
+      { "id": "explicit.stat_1039268420", "label": "Small Passive Skills in Radius also grant #% increased chance to Shock" },
+      { "id": "explicit.stat_3513818125", "label": "Small Passive Skills in Radius also grant #% increased Shock Duration" },
+      { "id": "explicit.stat_2704905000", "label": "Notable Passive Skills in Radius also grant #% increased Critical Hit Chance for Spells" },
+      { "id": "explicit.stat_2359002191", "label": "Notable Passive Skills in Radius also grant #% increased Critical Damage Bonus" },
+      { "id": "explicit.stat_2077117738", "label": "Notable Passive Skills in Radius also grant #% increased Critical Hit Chance" },
+      { "id": "explicit.stat_1166140625", "label": "Notable Passive Skills in Radius also grant #% increased Magnitude of Shock you inflict" },
+      { "id": "explicit.stat_525523040", "label": "Notable Passive Skills in Radius also grant Recover #% of maximum Mana on Kill" },
+      { "id": "explicit.stat_2589572664", "label": "Notable Passive Skills in Radius also grant #% increased maximum Mana" }
+    ]
+  },
+  {
+    "id": "time-lost-ruby",
+    "label": "Time-Lost Ruby",
+    "baseType": "Time-Lost Ruby",
+    "stats": [
+      { "id": "explicit.stat_1060572482", "label": "#% increased Effect of Small Passive Skills in Radius" },
+      { "id": "explicit.stat_3222402650", "label": "Small Passive Skills in Radius also grant #% increased Elemental Damage" },
+      { "id": "explicit.stat_139889694", "label": "Small Passive Skills in Radius also grant #% increased Fire Damage" },
+      { "id": "explicit.stat_1426522529", "label": "Small Passive Skills in Radius also grant #% increased Attack Damage" },
+      { "id": "explicit.stat_1337740333", "label": "Small Passive Skills in Radius also grant #% increased Melee Damage" },
+      { "id": "explicit.stat_3858398337", "label": "Small Passive Skills in Radius also grant #% increased Armour" },
+      { "id": "explicit.stat_484792219", "label": "Small Passive Skills in Radius also grant #% increased Stun Threshold" },
+      { "id": "explicit.stat_1809641701", "label": "Small Passive Skills in Radius also grant #% increased maximum Life" },
+      { "id": "explicit.stat_4173554949", "label": "Notable Passive Skills in Radius also grant #% increased Stun Buildup" },
+      { "id": "explicit.stat_253641217", "label": "Notable Passive Skills in Radius also grant #% increased Ignite Magnitude" },
+      { "id": "explicit.stat_391602279", "label": "Notable Passive Skills in Radius also grant #% increased Magnitude of Bleeding you inflict" },
+      { "id": "explicit.stat_2822644689", "label": "Notable Passive Skills in Radius also grant #% increased Attack Speed" },
+      { "id": "explicit.stat_2969557004", "label": "Notable Passive Skills in Radius also grant Gain # Rage on Melee Hit" },
+      { "id": "explicit.stat_160888068", "label": "Notable Passive Skills in Radius also grant #% increased maximum Life" }
+    ]
+  },
+  {
+    "id": "time-lost-emerald",
+    "label": "Time-Lost Emerald",
+    "baseType": "Time-Lost Emerald",
+    "stats": [
+      { "id": "explicit.stat_1060572482", "label": "#% increased Effect of Small Passive Skills in Radius" },
+      { "id": "explicit.stat_1994296038", "label": "Small Passive Skills in Radius also grant #% increased Evasion Rating" },
+      { "id": "explicit.stat_533892981", "label": "Small Passive Skills in Radius also grant #% increased Accuracy Rating" },
+      { "id": "explicit.stat_455816363", "label": "Small Passive Skills in Radius also grant #% increased Projectile Damage" },
+      { "id": "explicit.stat_945774314", "label": "Small Passive Skills in Radius also grant #% increased Damage with Bows" },
+      { "id": "explicit.stat_517664839", "label": "Small Passive Skills in Radius also grant #% increased Damage with Crossbows" },
+      { "id": "explicit.stat_2840989393", "label": "Small Passive Skills in Radius also grant #% chance to Poison on Hit" },
+      { "id": "explicit.stat_944643028", "label": "Small Passive Skills in Radius also grant #% chance to inflict Bleeding on Hit" },
+      { "id": "explicit.stat_3641543553", "label": "Notable Passive Skills in Radius also grant #% increased Attack Speed with Bows" },
+      { "id": "explicit.stat_715957346", "label": "Notable Passive Skills in Radius also grant #% increased Attack Speed with Crossbows" },
+      { "id": "explicit.stat_844449513", "label": "Notable Passive Skills in Radius also grant #% increased Movement Speed" },
+      { "id": "explicit.stat_462424929", "label": "Notable Passive Skills in Radius also grant #% increased Magnitude of Poison you inflict" },
+      { "id": "explicit.stat_1777421941", "label": "Notable Passive Skills in Radius also grant #% increased Projectile Speed" },
+      { "id": "explicit.stat_2717786748", "label": "Notable Passive Skills in Radius also grant #% increased Dexterity" }
+    ]
+  },
+  {
+    "id": "time-lost-diamond",
+    "label": "Time-Lost Diamond",
+    "baseType": "Time-Lost Diamond",
+    "stats": [
+      { "id": "explicit.stat_1060572482", "label": "#% increased Effect of Small Passive Skills in Radius" },
+      { "id": "explicit.stat_4234573345", "label": "#% increased Effect of Notable Passive Skills in Radius" },
+      { "id": "explicit.stat_2359002191", "label": "Notable Passive Skills in Radius also grant #% increased Critical Damage Bonus" },
+      { "id": "explicit.stat_2077117738", "label": "Notable Passive Skills in Radius also grant #% increased Critical Hit Chance" },
+      { "id": "explicit.stat_2704905000", "label": "Notable Passive Skills in Radius also grant #% increased Critical Hit Chance for Spells" },
+      { "id": "explicit.stat_3865605585", "label": "Notable Passive Skills in Radius also grant #% increased Critical Hit Chance for Attacks" },
+      { "id": "explicit.stat_1352561456", "label": "Notable Passive Skills in Radius also grant #% increased Critical Damage Bonus for Attack Damage" },
+      { "id": "explicit.stat_2466785537", "label": "Notable Passive Skills in Radius also grant #% increased Critical Spell Damage Bonus" },
+      { "id": "explicit.stat_1022759479", "label": "Notable Passive Skills in Radius also grant #% increased Cast Speed" },
+      { "id": "explicit.stat_2822644689", "label": "Notable Passive Skills in Radius also grant #% increased Attack Speed" },
+      { "id": "explicit.stat_3391917254", "label": "Notable Passive Skills in Radius also grant #% increased Area of Effect" },
+      { "id": "explicit.stat_3821543413", "label": "Notable Passive Skills in Radius also grant #% increased Block chance" },
+      { "id": "explicit.stat_40618390", "label": "Notable Passive Skills in Radius also grant #% increased Intelligence" },
+      { "id": "explicit.stat_1842384813", "label": "Notable Passive Skills in Radius also grant #% increased Strength" },
+      { "id": "explicit.stat_2717786748", "label": "Notable Passive Skills in Radius also grant #% increased Dexterity" }
+    ]
+  },
+  {
+    "id": "timeless",
+    "label": "Timeless Jewel",
+    "baseType": "Timeless Jewel",
+    "stats": []
+  }
+]

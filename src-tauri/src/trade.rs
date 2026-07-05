@@ -1,13 +1,32 @@
 use std::collections::HashSet;
+use std::sync::OnceLock;
 
 use crate::models::{
-    CapturedItem, TradeListing, TradeListingItem, TradePrice, TradeSearchResponse,
+    AppDiagnostic, CapturedItem, TradeListing, TradeListingItem, TradePrice, TradeSearchResponse,
 };
+use crate::stat_patterns::STAT_PATTERNS;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 const TRADE_BASE_URL: &str = "https://www.pathofexile.com";
 const FETCH_PAGE_SIZE: usize = 10;
+const QUICK_JEWEL_FILTERS_JSON: &str = include_str!("../../src/lib/quick-jewel-filters.json");
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QuickJewelFilter {
+    id: String,
+    label: String,
+    base_type: String,
+    stats: Vec<QuickJewelStat>,
+}
+
+#[derive(Debug, Deserialize)]
+struct QuickJewelStat {
+    id: String,
+    label: String,
+    min: Option<f64>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TradeFilterSpec {
@@ -21,7 +40,15 @@ pub struct TradeFilterSpec {
 #[derive(Debug, Clone, PartialEq)]
 enum TradeFilterKind {
     Category(String),
-    Stat { stat_id: String, value: f64 },
+    ItemType {
+        type_name: String,
+        category: Option<String>,
+    },
+    Stat {
+        stat_id: String,
+        value: Option<f64>,
+        max_value: Option<f64>,
+    },
 }
 
 pub fn trade_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
@@ -56,22 +83,44 @@ pub fn mapped_explicit_modifier_indices(item: &CapturedItem) -> HashSet<usize> {
     indices
 }
 
-pub fn build_trade_query(item: &CapturedItem, selected_filter_ids: &[String]) -> Result<Value, String> {
-    let selected = selected_filter_ids.iter().map(String::as_str).collect::<HashSet<_>>();
-    let trade_specs = trade_filter_specs(item);
-    let selected_specs = trade_specs
+pub fn build_trade_query(
+    item: &CapturedItem,
+    selected_filter_ids: &[String],
+) -> Result<Value, String> {
+    validate_selected_filter_ids(item, selected_filter_ids)?;
+
+    let selected = selected_filter_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let all_specs = all_trade_filter_specs(item);
+    let selected_specs = all_specs
         .iter()
         .filter(|spec| selected.contains(spec.id.as_str()))
         .collect::<Vec<_>>();
     let stat_filters = selected_specs
         .iter()
         .filter_map(|spec| match &spec.kind {
-            TradeFilterKind::Stat { stat_id, value } => Some(json!({
-                "id": stat_id,
-                "disabled": false,
-                "value": { "min": stat_value_json(*value) }
-            })),
-            TradeFilterKind::Category(_) => None,
+            TradeFilterKind::Stat {
+                stat_id,
+                value,
+                max_value,
+            } => {
+                let mut filter = json!({
+                    "id": stat_id,
+                    "disabled": false
+                });
+
+                if let Some(value) = value {
+                    filter["value"]["min"] = stat_value_json(*value);
+                }
+                if let Some(max_value) = max_value {
+                    filter["value"]["max"] = stat_value_json(*max_value);
+                }
+
+                Some(filter)
+            }
+            TradeFilterKind::Category(_) | TradeFilterKind::ItemType { .. } => None,
         })
         .collect::<Vec<_>>();
 
@@ -93,13 +142,6 @@ pub fn build_trade_query(item: &CapturedItem, selected_filter_ids: &[String]) ->
                 "disabled": false
             }
         ]);
-    }
-
-    for spec in &selected_specs {
-        if let TradeFilterKind::Category(category) = &spec.kind {
-            query["query"]["filters"]["type_filters"]["filters"]["category"]["option"] = json!(category);
-            query["query"]["filters"]["type_filters"]["disabled"] = json!(false);
-        }
     }
 
     if selected.contains("identity:type") {
@@ -127,19 +169,106 @@ pub fn build_trade_query(item: &CapturedItem, selected_filter_ids: &[String]) ->
         }
     }
 
+    if selected.contains("property:sockets") {
+        if let Some(count) = item.sockets.as_deref().and_then(socket_count) {
+            query["query"]["filters"]["equipment_filters"]["filters"]["rune_sockets"]["min"] =
+                json!(count);
+            query["query"]["filters"]["equipment_filters"]["disabled"] = json!(false);
+        }
+    }
+
+    for spec in &selected_specs {
+        match &spec.kind {
+            TradeFilterKind::Category(category) => {
+                query["query"]["filters"]["type_filters"]["filters"]["category"]["option"] =
+                    json!(category);
+                query["query"]["filters"]["type_filters"]["disabled"] = json!(false);
+            }
+            TradeFilterKind::ItemType {
+                type_name,
+                category,
+            } => {
+                query["query"]["type"] = json!(type_name);
+                if let Some(category) = category {
+                    query["query"]["filters"]["type_filters"]["filters"]["category"]["option"] =
+                        json!(category);
+                    query["query"]["filters"]["type_filters"]["disabled"] = json!(false);
+                }
+            }
+            TradeFilterKind::Stat { .. } => {}
+        }
+    }
+
     query["query"]["filters"]["trade_filters"]["filters"] = json!({});
 
     Ok(query)
 }
 
-pub fn selected_pseudo_stat_ids(item: &CapturedItem, selected_filter_ids: &[String]) -> Vec<String> {
-    let selected = selected_filter_ids.iter().map(String::as_str).collect::<HashSet<_>>();
+fn validate_selected_filter_ids(
+    item: &CapturedItem,
+    selected_filter_ids: &[String],
+) -> Result<(), String> {
+    let valid_ids = supported_filter_ids(item);
+    let mut invalid_ids = selected_filter_ids
+        .iter()
+        .filter(|id| !valid_ids.contains(id.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
 
-    trade_filter_specs(item)
+    invalid_ids.sort();
+    invalid_ids.dedup();
+
+    if invalid_ids.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Unknown selected filter IDs: {}. Re-parse the current item and try again.",
+            invalid_ids.join(", ")
+        ))
+    }
+}
+
+fn supported_filter_ids(item: &CapturedItem) -> HashSet<String> {
+    let mut ids = all_trade_filter_specs(item)
+        .into_iter()
+        .map(|spec| spec.id)
+        .collect::<HashSet<_>>();
+
+    if item.base_type.is_some() {
+        ids.insert("identity:type".to_string());
+    }
+    if item.rarity.is_some() {
+        ids.insert("identity:rarity".to_string());
+    }
+    if item.item_level.is_some() {
+        ids.insert("misc:item_level".to_string());
+    }
+    if item.quality.is_some() {
+        ids.insert("property:quality".to_string());
+    }
+    if item.sockets.as_deref().and_then(socket_count).is_some() {
+        ids.insert("property:sockets".to_string());
+    }
+
+    ids
+}
+
+pub fn selected_pseudo_stat_ids(
+    item: &CapturedItem,
+    selected_filter_ids: &[String],
+) -> Vec<String> {
+    let selected = selected_filter_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+
+    all_trade_filter_specs(item)
         .into_iter()
         .filter(|spec| selected.contains(spec.id.as_str()))
         .filter_map(|spec| match spec.kind {
-            TradeFilterKind::Stat { stat_id, .. } if stat_id.starts_with("pseudo.") => Some(stat_id),
+            TradeFilterKind::Stat { stat_id, .. } if stat_id.starts_with("pseudo.") => {
+                Some(stat_id)
+            }
             _ => None,
         })
         .collect()
@@ -235,7 +364,12 @@ pub async fn search_trade(
     }
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
-        return Err(format!("POE2 trade API returned {status}: {}", body.trim()));
+        return Err(format_trade_api_error(
+            &status.to_string(),
+            &body,
+            item,
+            selected_filter_ids,
+        ));
     }
 
     let body = response
@@ -258,6 +392,7 @@ pub async fn search_trade(
     let mut listings = Vec::new();
     let mut fetch_url = None;
     let mut warning = None;
+    let mut diagnostics = Vec::new();
 
     if first_page_ids.is_empty() {
         warning = Some("The POE2 trade API returned no matching listings.".to_string());
@@ -267,7 +402,14 @@ pub async fn search_trade(
 
         match fetch_trade_listings(&url).await {
             Ok(fetched) => listings = fetched,
-            Err(error) => warning = Some(error),
+            Err(error) => {
+                diagnostics.push(AppDiagnostic {
+                    code: "listing_fetch_failed".to_string(),
+                    message: "First-page listing fetch failed.".to_string(),
+                    detail: Some(error.clone()),
+                });
+                warning = Some(error);
+            }
         }
     }
 
@@ -281,7 +423,76 @@ pub async fn search_trade(
         query,
         fetch_url,
         warning,
+        diagnostics,
     })
+}
+
+fn format_trade_api_error(
+    status: &str,
+    body: &str,
+    item: &CapturedItem,
+    selected_filter_ids: &[String],
+) -> String {
+    let api_message = parse_api_error_message(body)
+        .unwrap_or_else(|| body.trim().to_string())
+        .trim()
+        .to_string();
+    let selected_ids = format_id_list(selected_filter_ids);
+    let stat_ids = format_id_list(&selected_stat_ids(item, selected_filter_ids));
+
+    format!(
+        "POE2 trade API returned {status}: {api_message}. Selected filter IDs: {selected_ids}. Sent stat IDs: {stat_ids}."
+    )
+}
+
+fn parse_api_error_message(body: &str) -> Option<String> {
+    #[derive(Debug, Deserialize)]
+    struct ApiErrorEnvelope {
+        error: Option<ApiErrorBody>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct ApiErrorBody {
+        code: Option<i64>,
+        message: Option<String>,
+    }
+
+    let parsed = serde_json::from_str::<ApiErrorEnvelope>(body).ok()?;
+    let error = parsed.error?;
+
+    match (error.code, error.message) {
+        (Some(code), Some(message)) => Some(format!("{message} (code {code})")),
+        (None, Some(message)) => Some(message),
+        (Some(code), None) => Some(format!("API error code {code}")),
+        (None, None) => None,
+    }
+}
+
+fn selected_stat_ids(item: &CapturedItem, selected_filter_ids: &[String]) -> Vec<String> {
+    let selected = selected_filter_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let mut stat_ids = all_trade_filter_specs(item)
+        .into_iter()
+        .filter(|spec| selected.contains(spec.id.as_str()))
+        .filter_map(|spec| match spec.kind {
+            TradeFilterKind::Stat { stat_id, .. } => Some(stat_id),
+            TradeFilterKind::Category(_) | TradeFilterKind::ItemType { .. } => None,
+        })
+        .collect::<Vec<_>>();
+
+    stat_ids.sort();
+    stat_ids.dedup();
+    stat_ids
+}
+
+fn format_id_list(ids: &[String]) -> String {
+    if ids.is_empty() {
+        "none".to_string()
+    } else {
+        ids.join(", ")
+    }
 }
 
 pub fn validate_trade_url(url: &str) -> Result<String, String> {
@@ -316,7 +527,10 @@ async fn fetch_trade_listings(fetch_url: &str) -> Result<Vec<TradeListing>, Stri
     }
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
-        return Err(format!("POE2 trade listing fetch returned {status}: {}", body.trim()));
+        return Err(format!(
+            "POE2 trade listing fetch returned {status}: {}",
+            body.trim()
+        ));
     }
 
     let body = response
@@ -340,6 +554,56 @@ pub fn is_blocked_or_rate_limited(status: u16) -> bool {
     status == 403 || status == 429
 }
 
+fn all_trade_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
+    let mut specs = trade_filter_specs(item);
+    specs.extend(quick_filter_specs());
+    specs
+}
+
+fn quick_filter_specs() -> Vec<TradeFilterSpec> {
+    let mut specs = Vec::new();
+
+    for jewel in quick_jewel_filters() {
+        specs.push(TradeFilterSpec {
+            id: format!("quick:jewel:{}:base", jewel.id),
+            label: format!("Jewel: {}", jewel.label),
+            selected_by_default: false,
+            source_modifier_index: None,
+            kind: TradeFilterKind::ItemType {
+                type_name: jewel.base_type.clone(),
+                category: Some("jewel".to_string()),
+            },
+        });
+
+        for stat in &jewel.stats {
+            specs.push(TradeFilterSpec {
+                id: format!("quick:jewel:{}:stat:{}", jewel.id, stat.id),
+                label: format!("{}: {}", jewel.label, stat.label),
+                selected_by_default: false,
+                source_modifier_index: None,
+                kind: TradeFilterKind::Stat {
+                    stat_id: stat.id.clone(),
+                    value: stat.min,
+                    max_value: None,
+                },
+            });
+        }
+    }
+
+    specs
+}
+
+fn quick_jewel_filters() -> &'static [QuickJewelFilter] {
+    static FILTERS: OnceLock<Vec<QuickJewelFilter>> = OnceLock::new();
+
+    FILTERS
+        .get_or_init(|| {
+            serde_json::from_str(QUICK_JEWEL_FILTERS_JSON)
+                .expect("quick jewel filter catalog should be valid JSON")
+        })
+        .as_slice()
+}
+
 fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
     let mut keyed_specs = Vec::new();
     let mut elemental_resistance_total = 0.0;
@@ -348,65 +612,7 @@ fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
     for modifier in &item.explicit_mods {
         let text = normalized_modifier_text(&modifier.text);
 
-        if let Some(value) = mapped_explicit_stat_value(&text, "to maximum Energy Shield") {
-            keyed_specs.push((
-                modifier.index,
-                TradeFilterSpec {
-                    id: format!("stat:explicit.stat_4052037485:{}", modifier.index),
-                    label: format!("Maximum Energy Shield: {}+", format_filter_value(value)),
-                    selected_by_default: true,
-                    source_modifier_index: Some(modifier.index),
-                    kind: TradeFilterKind::Stat {
-                        stat_id: "explicit.stat_4052037485".to_string(),
-                        value,
-                    },
-                },
-            ));
-        } else if let Some(value) = mapped_explicit_stat_value(&text, "increased Energy Shield") {
-            keyed_specs.push((
-                modifier.index,
-                TradeFilterSpec {
-                    id: format!("stat:explicit.stat_4015621042:{}", modifier.index),
-                    label: format!("Increased Energy Shield: {}%+", format_filter_value(value)),
-                    selected_by_default: true,
-                    source_modifier_index: Some(modifier.index),
-                    kind: TradeFilterKind::Stat {
-                        stat_id: "explicit.stat_4015621042".to_string(),
-                        value,
-                    },
-                },
-            ));
-        } else if let Some(value) =
-            mapped_explicit_stat_value(&text, "increased Rarity of Items found")
-        {
-            keyed_specs.push((
-                modifier.index,
-                TradeFilterSpec {
-                    id: format!("stat:explicit.stat_3917489142:{}", modifier.index),
-                    label: format!("Rarity of Items: {}%+", format_filter_value(value)),
-                    selected_by_default: true,
-                    source_modifier_index: Some(modifier.index),
-                    kind: TradeFilterKind::Stat {
-                        stat_id: "explicit.stat_3917489142".to_string(),
-                        value,
-                    },
-                },
-            ));
-        } else if let Some(value) = mapped_explicit_stat_value(&text, "to Stun Threshold") {
-            keyed_specs.push((
-                modifier.index,
-                TradeFilterSpec {
-                    id: format!("stat:explicit.stat_915769802:{}", modifier.index),
-                    label: format!("Stun Threshold: {}+", format_filter_value(value)),
-                    selected_by_default: true,
-                    source_modifier_index: Some(modifier.index),
-                    kind: TradeFilterKind::Stat {
-                        stat_id: "explicit.stat_915769802".to_string(),
-                        value,
-                    },
-                },
-            ));
-        } else if let Some((stat_id, label, value)) = mapped_general_stat(&text) {
+        if let Some((stat_id, label, value)) = mapped_charm_slots(&text) {
             keyed_specs.push((
                 modifier.index,
                 TradeFilterSpec {
@@ -414,7 +620,43 @@ fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
                     label,
                     selected_by_default: true,
                     source_modifier_index: Some(modifier.index),
-                    kind: TradeFilterKind::Stat { stat_id, value },
+                    kind: TradeFilterKind::Stat {
+                        stat_id,
+                        value: Some(value),
+                        max_value: None,
+                    },
+                },
+            ));
+        } else if let Some((stat_id, label, max_value)) = mapped_reduced_poison_duration(&text) {
+            keyed_specs.push((
+                modifier.index,
+                TradeFilterSpec {
+                    id: format!("stat:{stat_id}:{}", modifier.index),
+                    label,
+                    selected_by_default: true,
+                    source_modifier_index: Some(modifier.index),
+                    kind: TradeFilterKind::Stat {
+                        stat_id,
+                        value: None,
+                        max_value: Some(max_value),
+                    },
+                },
+            ));
+        } else if let Some((stat_id, label, value)) =
+            mapped_official_stat(&text, item.item_class.as_deref())
+        {
+            keyed_specs.push((
+                modifier.index,
+                TradeFilterSpec {
+                    id: format!("stat:{stat_id}:{}", modifier.index),
+                    label,
+                    selected_by_default: true,
+                    source_modifier_index: Some(modifier.index),
+                    kind: TradeFilterKind::Stat {
+                        stat_id,
+                        value,
+                        max_value: None,
+                    },
                 },
             ));
         }
@@ -440,7 +682,8 @@ fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
                 source_modifier_index: first_resistance_index,
                 kind: TradeFilterKind::Stat {
                     stat_id: "pseudo.pseudo_total_elemental_resistance".to_string(),
-                    value: elemental_resistance_total,
+                    value: Some(elemental_resistance_total),
+                    max_value: None,
                 },
             },
         ));
@@ -450,68 +693,13 @@ fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
     keyed_specs.into_iter().map(|(_, spec)| spec).collect()
 }
 
-fn mapped_explicit_stat_value(text: &str, marker: &str) -> Option<f64> {
-    text.contains(marker).then(|| parse_first_number(text)).flatten()
-}
+pub fn socket_count(sockets: &str) -> Option<u32> {
+    let count = sockets
+        .split_whitespace()
+        .filter(|part| part.chars().any(|ch| ch.is_ascii_alphanumeric()))
+        .count();
 
-fn mapped_general_stat(text: &str) -> Option<(String, String, f64)> {
-    if text.contains("Allies in your Presence have") && text.contains("increased Attack Speed") {
-        let value = parse_first_number(text)?;
-        let prefix = stat_source_prefix(text);
-        return Some((
-            format!("{prefix}.stat_1998951374"),
-            format!("Allies Attack Speed: {}%+", format_filter_value(value)),
-            value,
-        ));
-    }
-
-    if text.contains("increased Spirit") {
-        let value = parse_first_number(text)?;
-        let prefix = stat_source_prefix(text);
-        return Some((
-            format!("{prefix}.stat_3984865854"),
-            format!("Spirit: {}%+", format_filter_value(value)),
-            value,
-        ));
-    }
-
-    if text.contains("Allies in your Presence Regenerate") && text.contains("Life per second") {
-        let value = parse_first_number(text)?;
-        return Some((
-            "explicit.stat_4010677958".to_string(),
-            format!("Allies Life Regen: {}+", format_filter_value(value)),
-            value,
-        ));
-    }
-
-    if text.contains("to all Attributes") {
-        let value = parse_first_number(text)?;
-        let prefix = stat_source_prefix(text);
-        return Some((
-            format!("{prefix}.stat_1379411836"),
-            format!("All Attributes: {}+", format_filter_value(value)),
-            value,
-        ));
-    }
-
-    if text.contains("Companions deal") && text.contains("increased damage to your Marked targets") {
-        let value = parse_first_number(text)?;
-        return Some((
-            "explicit.stat_1067622524".to_string(),
-            format!("Companion Marked Damage: {}%+", format_filter_value(value)),
-            value,
-        ));
-    }
-
-    None
-}
-
-fn stat_source_prefix(text: &str) -> &'static str {
-    if text.contains("(rune)") {
-        "rune"
-    } else {
-        "explicit"
-    }
+    (count > 0).then_some(count as u32)
 }
 
 fn parse_first_number(value: &str) -> Option<f64> {
@@ -547,8 +735,390 @@ fn is_elemental_resistance_modifier(text: &str) -> bool {
         && !text.contains("Chaos Resistance")
 }
 
+pub fn should_show_unsupported_modifier(text: &str) -> bool {
+    match clean_modifier_search_text(text) {
+        Some(search_text) => search_text.chars().any(|ch| ch.is_ascii_digit()),
+        None => false,
+    }
+}
+
 fn normalized_modifier_text(text: &str) -> String {
-    text.replace('[', "").replace(']', "").replace('|', " ")
+    expand_trade_text_tags(text)
+}
+
+fn mapped_official_stat(
+    text: &str,
+    item_class: Option<&str>,
+) -> Option<(String, String, Option<f64>)> {
+    let search_text = clean_modifier_search_text(text)?;
+    let comparable_modifier = comparable_modifier_text(&search_text);
+    let preferred_sources = preferred_stat_sources(text);
+    let mut best = None;
+
+    for pattern in STAT_PATTERNS {
+        let comparable_pattern = comparable_pattern_text(pattern.text);
+        let Some(value) = match_stat_template(&comparable_pattern, &comparable_modifier) else {
+            continue;
+        };
+        let rank = stat_source_rank(stat_source(pattern.id), &preferred_sources) * 10
+            + local_stat_rank(pattern.text, &search_text, item_class);
+
+        if best
+            .as_ref()
+            .map_or(true, |(best_rank, _, _, _)| rank < *best_rank)
+        {
+            best = Some((rank, pattern.id, pattern.text, value));
+
+            if rank == 0 {
+                break;
+            }
+        }
+    }
+
+    best.map(|(_, stat_id, pattern_text, value)| {
+        (
+            stat_id.to_string(),
+            stat_filter_label(&search_text, pattern_text, value),
+            value,
+        )
+    })
+}
+
+fn mapped_reduced_poison_duration(text: &str) -> Option<(String, String, f64)> {
+    let search_text = clean_modifier_search_text(text)?;
+    let comparable_modifier = comparable_modifier_text(&search_text);
+    let comparable_pattern = comparable_pattern_text("#% reduced Poison Duration on you");
+    let value = match_stat_template(&comparable_pattern, &comparable_modifier)??;
+    let display_value = format_filter_value(value);
+
+    Some((
+        "explicit.stat_3301100256".to_string(),
+        format!("Reduced Poison Duration on you: {display_value}%+ reduction"),
+        -value,
+    ))
+}
+
+fn mapped_charm_slots(text: &str) -> Option<(String, String, f64)> {
+    let search_text = clean_modifier_search_text(text)?;
+    let comparable_modifier = comparable_modifier_text(&search_text);
+    let value = ["Has # Charm Slot", "Has # Charm Slots"]
+        .into_iter()
+        .find_map(|pattern| {
+            let comparable_pattern = comparable_pattern_text(pattern);
+            match_stat_template(&comparable_pattern, &comparable_modifier)
+        })??;
+    let display_value = format_filter_value(value);
+
+    Some((
+        "explicit.stat_1416292992".to_string(),
+        format!("Charm Slots: {display_value}+"),
+        value,
+    ))
+}
+
+fn clean_modifier_search_text(text: &str) -> Option<String> {
+    let expanded = expand_trade_text_tags(text).replace('\u{2019}', "'");
+    let unscalable_stripped = strip_unscalable_suffix(&expanded);
+    let source_stripped = strip_source_suffix(&unscalable_stripped);
+    let trimmed = source_stripped.trim();
+
+    if trimmed.is_empty() || is_modifier_section_marker(trimmed) {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn strip_unscalable_suffix(text: &str) -> String {
+    let mut result = text.trim().to_string();
+
+    for suffix in [
+        " -- Unscalable Value",
+        " - Unscalable Value",
+        " \u{2014} Unscalable Value",
+    ] {
+        if result.ends_with(suffix) {
+            result.truncate(result.len() - suffix.len());
+            break;
+        }
+    }
+
+    result
+}
+
+fn strip_source_suffix(text: &str) -> String {
+    let mut result = text.trim().to_string();
+
+    loop {
+        let lower = result.to_lowercase();
+        let mut stripped = false;
+
+        for suffix in [
+            " (rune)",
+            " (crafted)",
+            " (implicit)",
+            " (enchant)",
+            " (desecrated)",
+            " (fractured)",
+            " (sanctum)",
+        ] {
+            if lower.ends_with(suffix) {
+                result.truncate(result.len() - suffix.len());
+                result = result.trim_end().to_string();
+                stripped = true;
+                break;
+            }
+        }
+
+        if !stripped {
+            break;
+        }
+    }
+
+    result
+}
+
+fn is_modifier_section_marker(text: &str) -> bool {
+    text.starts_with('{') && text.ends_with('}')
+}
+
+fn comparable_pattern_text(text: &str) -> String {
+    let comparable = comparable_stat_text(&expand_trade_text_tags(text).replace("+#", "#"));
+    comparable
+        .strip_suffix(" (local)")
+        .unwrap_or(&comparable)
+        .to_string()
+}
+
+fn comparable_modifier_text(text: &str) -> String {
+    comparable_stat_text(text)
+}
+
+fn comparable_stat_text(text: &str) -> String {
+    text.replace('\u{2019}', "'")
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn expand_trade_text_tags(text: &str) -> String {
+    let mut result = String::new();
+    let mut chars = text.chars();
+
+    while let Some(ch) = chars.next() {
+        if ch != '[' {
+            result.push(ch);
+            continue;
+        }
+
+        let mut tag = String::new();
+        let mut closed = false;
+
+        for tag_ch in chars.by_ref() {
+            if tag_ch == ']' {
+                closed = true;
+                break;
+            }
+            tag.push(tag_ch);
+        }
+
+        if closed {
+            if let Some((_, display)) = tag.split_once('|') {
+                result.push_str(display);
+            } else {
+                result.push_str(&tag);
+            }
+        } else {
+            result.push('[');
+            result.push_str(&tag);
+        }
+    }
+
+    result
+}
+
+fn preferred_stat_sources(text: &str) -> Vec<&'static str> {
+    let lower = text.to_lowercase();
+
+    if lower.contains("(rune)") {
+        vec!["rune", "explicit"]
+    } else if lower.contains("(crafted)") {
+        vec!["crafted", "explicit"]
+    } else if lower.contains("(implicit)") {
+        vec!["implicit", "explicit"]
+    } else if lower.contains("(enchant)") {
+        vec!["enchant", "explicit"]
+    } else if lower.contains("(desecrated)") {
+        vec!["desecrated", "explicit"]
+    } else if lower.contains("(fractured)") {
+        vec!["fractured", "explicit"]
+    } else if lower.contains("(sanctum)") {
+        vec!["sanctum", "explicit"]
+    } else {
+        vec![
+            "explicit",
+            "implicit",
+            "rune",
+            "crafted",
+            "fractured",
+            "desecrated",
+            "enchant",
+            "sanctum",
+            "pseudo",
+        ]
+    }
+}
+
+fn stat_source(stat_id: &str) -> &str {
+    stat_id
+        .split_once('.')
+        .map(|(source, _)| source)
+        .unwrap_or_default()
+}
+
+fn stat_source_rank(source: &str, preferred_sources: &[&str]) -> usize {
+    if let Some(index) = preferred_sources
+        .iter()
+        .position(|preferred_source| *preferred_source == source)
+    {
+        return index;
+    }
+
+    match source {
+        "explicit" => 20,
+        "implicit" => 21,
+        "rune" => 22,
+        "crafted" => 23,
+        "fractured" => 24,
+        "desecrated" => 25,
+        "enchant" => 26,
+        "sanctum" => 27,
+        "pseudo" => 28,
+        _ => 99,
+    }
+}
+
+fn local_stat_rank(pattern_text: &str, modifier_text: &str, item_class: Option<&str>) -> usize {
+    let pattern_is_local = comparable_stat_text(pattern_text).ends_with(" (local)");
+    let prefer_local =
+        item_class.is_some_and(is_armour_item_class) && is_local_defence_modifier(modifier_text);
+
+    match (pattern_is_local, prefer_local) {
+        (true, true) | (false, false) => 0,
+        (false, true) | (true, false) => 1,
+    }
+}
+
+fn is_armour_item_class(item_class: &str) -> bool {
+    matches!(
+        item_class,
+        "Body Armours" | "Boots" | "Gloves" | "Helmets" | "Shields"
+    )
+}
+
+fn is_local_defence_modifier(text: &str) -> bool {
+    let lower = text.to_lowercase();
+
+    !lower.contains("global")
+        && (lower.contains("armour")
+            || lower.contains("evasion rating")
+            || lower.contains("energy shield"))
+}
+
+fn match_stat_template(pattern: &str, modifier: &str) -> Option<Option<f64>> {
+    if !pattern.contains('#') {
+        return (pattern == modifier).then_some(None);
+    }
+
+    let parts = pattern.split('#').collect::<Vec<_>>();
+    let mut position = 0;
+    let mut first_value = None;
+
+    if !match_literal_at(modifier, &mut position, parts[0]) {
+        return None;
+    }
+
+    for part in parts.iter().skip(1) {
+        let (value, next_position) = parse_template_number(modifier, position)?;
+        first_value.get_or_insert(value);
+        position = next_position;
+
+        if !match_literal_at(modifier, &mut position, part) {
+            return None;
+        }
+    }
+
+    (position == modifier.len()).then_some(first_value)
+}
+
+fn match_literal_at(text: &str, position: &mut usize, literal: &str) -> bool {
+    if literal.is_empty() {
+        return true;
+    }
+
+    match text.get(*position..) {
+        Some(remaining) if remaining.starts_with(literal) => {
+            *position += literal.len();
+            true
+        }
+        _ => false,
+    }
+}
+
+fn parse_template_number(text: &str, position: usize) -> Option<(f64, usize)> {
+    let bytes = text.as_bytes();
+    let mut index = position;
+
+    if index >= bytes.len() {
+        return None;
+    }
+
+    let number_start = index;
+    if bytes[index] == b'+' || bytes[index] == b'-' {
+        index += 1;
+    }
+
+    let digit_start = index;
+    let mut has_digit = false;
+
+    while index < bytes.len() {
+        match bytes[index] {
+            b'0'..=b'9' => {
+                has_digit = true;
+                index += 1;
+            }
+            b'.' | b',' => {
+                index += 1;
+            }
+            _ => break,
+        }
+    }
+
+    if !has_digit || digit_start == index {
+        return None;
+    }
+
+    let raw_number = text[number_start..index].replace('+', "").replace(',', "");
+    let value = raw_number.parse::<f64>().ok()?;
+
+    if text
+        .get(index..)
+        .is_some_and(|remaining| remaining.starts_with('('))
+    {
+        if let Some(offset) = text[index..].find(')') {
+            index += offset + 1;
+        }
+    }
+
+    Some((value, index))
+}
+
+fn stat_filter_label(modifier_text: &str, _pattern_text: &str, value: Option<f64>) -> String {
+    match value {
+        Some(value) => format!("{}: {}+", modifier_text, format_filter_value(value)),
+        None => modifier_text.to_string(),
+    }
 }
 
 fn category_for_item_class(item_class: &str) -> Option<&'static str> {
@@ -641,9 +1211,11 @@ impl FetchMod {
 
 #[cfg(test)]
 mod tests {
+    use crate::models::CapturedItem;
     use crate::parser::parse_item_text;
     use crate::trade::{
-        build_fetch_url, build_trade_query, is_blocked_or_rate_limited, map_fetch_response,
+        build_fetch_url, build_trade_query, format_trade_api_error, is_blocked_or_rate_limited,
+        map_fetch_response,
     };
 
     const RARE_BOOTS: &str = "Item Class: Boots
@@ -701,23 +1273,119 @@ Companions deal 97(50-100)% increased damage to your Marked targets
 You can have any number of Companions of different types — Unscalable Value
 Darkness howls through ancient bones, a wistful cry";
 
+    const UNIQUE_BODY_ARMOUR_WITH_RANGED_STATS: &str = "Item Class: Body Armours
+Rarity: Unique
+Trial Shelter
+Expert Hexer's Robe
+--------
+Item Level: 82
+--------
+{ Enhancement }
+Allocates Zarokh's Gift -- Unscalable Value
+{ Implicit Modifier }
+40(39-44)% increased Evasion Rating
++114(100-119) to maximum Life
++17(17-18)% to all Elemental Resistances
++2 to Level of all Melee Skills";
+
+    const RARE_WITH_SOCKETS_AND_REDUCED_POISON_DURATION: &str = "Item Class: Boots
+Rarity: Rare
+Plague Slippers
+Bound Sandals
+--------
+Sockets: S S
+--------
+Item Level: 72
+--------
+59(60-56)% reduced Poison Duration on you";
+
+    const RARE_BELT_WITH_CHARM_SLOTS: &str = "Item Class: Belts
+Rarity: Rare
+Binding Buckle
+Mail Belt
+--------
+Item Level: 82
+--------
++114(100-119) to maximum Life
++17(17-18)% to all Elemental Resistances
++2 to Level of all Melee Skills
+Has 2(1-3) Charm Slots";
+
+    fn empty_item() -> CapturedItem {
+        CapturedItem {
+            raw_text: String::new(),
+            item_class: None,
+            rarity: None,
+            item_name: None,
+            base_type: None,
+            item_level: None,
+            quality: None,
+            sockets: None,
+            properties: Vec::new(),
+            explicit_mods: Vec::new(),
+        }
+    }
+
     #[test]
     fn query_builder_includes_only_selected_supported_filters() {
         let item = parse_item_text(RARE_BODY_ARMOUR).expect("item should parse");
         let query = build_trade_query(
             &item,
-            &[
-                "identity:type".to_string(),
-                "misc:item_level".to_string(),
-                "explicit:0".to_string(),
-            ],
+            &["identity:type".to_string(), "misc:item_level".to_string()],
         )
         .expect("query should build");
 
         assert_eq!(query["query"]["type"], "Expert Hexer's Robe");
-        assert_eq!(query["query"]["filters"]["misc_filters"]["filters"]["ilvl"]["min"], 72);
-        assert!(query["query"]["stats"].as_array().expect("stats array").is_empty());
+        assert_eq!(
+            query["query"]["filters"]["misc_filters"]["filters"]["ilvl"]["min"],
+            72
+        );
+        assert!(query["query"]["stats"]
+            .as_array()
+            .expect("stats array")
+            .is_empty());
         assert!(query["query"]["filters"]["trade_filters"].is_object());
+    }
+
+    #[test]
+    fn query_builder_rejects_unknown_selected_filter_ids() {
+        let item = parse_item_text(RARE_BODY_ARMOUR).expect("item should parse");
+        let error = build_trade_query(
+            &item,
+            &[
+                "identity:type".to_string(),
+                "stat:explicit.stat_not_real:99".to_string(),
+                "explicit:0".to_string(),
+            ],
+        )
+        .expect_err("unknown selected ids should fail before API search");
+
+        assert!(error.contains("Unknown selected filter IDs"));
+        assert!(error.contains("stat:explicit.stat_not_real:99"));
+        assert!(error.contains("explicit:0"));
+    }
+
+    #[test]
+    fn api_error_message_lists_selected_filter_and_stat_ids() {
+        let item = parse_item_text(RARE_BOOTS).expect("boots should parse");
+        let selected_filter_ids = vec![
+            "category:armour.boots".to_string(),
+            "stat:explicit.stat_4052037485:0".to_string(),
+            "stat:explicit.stat_4015621042:1".to_string(),
+        ];
+        let message = format_trade_api_error(
+            "400 Bad Request",
+            r#"{"error":{"code":2,"message":"Unknown stat id"}}"#,
+            &item,
+            &selected_filter_ids,
+        );
+
+        assert!(message.contains("Unknown stat id"));
+        assert!(message.contains("Selected filter IDs: category:armour.boots"));
+        assert!(message.contains("stat:explicit.stat_4052037485:0"));
+        assert!(message.contains("Sent stat IDs:"));
+        assert!(message.contains("explicit.stat_4052037485"));
+        assert!(message.contains("explicit.stat_4015621042"));
     }
 
     #[test]
@@ -772,7 +1440,8 @@ Darkness howls through ancient bones, a wistful cry";
     #[test]
     fn query_builder_uses_unique_base_type_not_unique_name() {
         let item = parse_item_text(UNIQUE_HELMET).expect("unique helmet should parse");
-        let query = build_trade_query(&item, &["identity:type".to_string()]).expect("query should build");
+        let query =
+            build_trade_query(&item, &["identity:type".to_string()]).expect("query should build");
 
         assert_eq!(query["query"]["type"], "Cultist Crown");
     }
@@ -824,8 +1493,137 @@ Darkness howls through ancient bones, a wistful cry";
     }
 
     #[test]
+    fn query_builder_maps_official_stat_templates_with_copied_ranges() {
+        let item = parse_item_text(UNIQUE_BODY_ARMOUR_WITH_RANGED_STATS)
+            .expect("unique body armour should parse");
+        let query = build_trade_query(
+            &item,
+            &[
+                "stat:explicit.stat_2954116742|11184:1".to_string(),
+                "stat:explicit.stat_124859000:3".to_string(),
+                "stat:explicit.stat_3299347043:4".to_string(),
+                "stat:explicit.stat_2901986750:5".to_string(),
+                "stat:explicit.stat_9187492:6".to_string(),
+            ],
+        )
+        .expect("query should build");
+
+        let filters = query["query"]["stats"][0]["filters"]
+            .as_array()
+            .expect("stat filters");
+        let observed = filters
+            .iter()
+            .map(|filter| {
+                (
+                    filter["id"].as_str().expect("id"),
+                    filter["value"]["min"].as_f64(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            observed,
+            vec![
+                ("explicit.stat_2954116742|11184", None),
+                ("explicit.stat_124859000", Some(40.0)),
+                ("explicit.stat_3299347043", Some(114.0)),
+                ("explicit.stat_2901986750", Some(17.0)),
+                ("explicit.stat_9187492", Some(2.0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn query_builder_accepts_quick_sapphire_jewel_filters() {
+        let item = empty_item();
+        let query = build_trade_query(
+            &item,
+            &[
+                "quick:jewel:sapphire:base".to_string(),
+                "quick:jewel:sapphire:stat:explicit.stat_2482852589".to_string(),
+                "quick:jewel:sapphire:stat:explicit.stat_2527686725".to_string(),
+                "quick:jewel:sapphire:stat:explicit.stat_3556824919".to_string(),
+                "quick:jewel:sapphire:stat:explicit.stat_587431675".to_string(),
+            ],
+        )
+        .expect("quick jewel query should build");
+
+        assert_eq!(query["query"]["type"], "Sapphire");
+        assert_eq!(
+            query["query"]["filters"]["type_filters"]["filters"]["category"]["option"],
+            "jewel"
+        );
+
+        let filters = query["query"]["stats"][0]["filters"]
+            .as_array()
+            .expect("stat filters");
+        let observed = filters
+            .iter()
+            .map(|filter| {
+                (
+                    filter["id"].as_str().expect("id"),
+                    filter["value"]["min"].as_i64().expect("min"),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            observed,
+            vec![
+                ("explicit.stat_2482852589", 15),
+                ("explicit.stat_2527686725", 10),
+                ("explicit.stat_3556824919", 10),
+                ("explicit.stat_587431675", 10),
+            ]
+        );
+    }
+
+    #[test]
+    fn query_builder_maps_sockets_and_reduced_poison_duration() {
+        let item = parse_item_text(RARE_WITH_SOCKETS_AND_REDUCED_POISON_DURATION)
+            .expect("item should parse");
+        let query = build_trade_query(
+            &item,
+            &[
+                "property:sockets".to_string(),
+                "stat:explicit.stat_3301100256:0".to_string(),
+            ],
+        )
+        .expect("query should build");
+
+        assert_eq!(
+            query["query"]["filters"]["equipment_filters"]["filters"]["rune_sockets"]["min"],
+            2
+        );
+        assert_eq!(
+            query["query"]["filters"]["equipment_filters"]["disabled"],
+            false
+        );
+
+        let filter = &query["query"]["stats"][0]["filters"][0];
+        assert_eq!(filter["id"], "explicit.stat_3301100256");
+        assert_eq!(filter["value"]["max"], -59);
+    }
+
+    #[test]
+    fn query_builder_maps_ranged_charm_slots() {
+        let item = parse_item_text(RARE_BELT_WITH_CHARM_SLOTS).expect("item should parse");
+        let query = build_trade_query(
+            &item,
+            &["stat:explicit.stat_1416292992:3".to_string()],
+        )
+        .expect("query should build");
+
+        let filter = &query["query"]["stats"][0]["filters"][0];
+        assert_eq!(filter["id"], "explicit.stat_1416292992");
+        assert_eq!(filter["value"]["min"], 2);
+    }
+
+    #[test]
     fn fetch_url_includes_result_ids_query_realm_and_pseudos() {
-        let ids = (0..10).map(|index| format!("id{index}")).collect::<Vec<_>>();
+        let ids = (0..10)
+            .map(|index| format!("id{index}"))
+            .collect::<Vec<_>>();
         let url = build_fetch_url(
             "d8LMyZrRsJ",
             &ids,
@@ -869,14 +1667,20 @@ Darkness howls through ancient bones, a wistful cry";
         let listings = map_fetch_response(response).expect("fetch response should map");
 
         assert_eq!(listings.len(), 1);
-        assert_eq!(listings[0].id, "87dc03118c0a90f95957ae9b5495f322d2de521879fb97d093ad6a71dafcde68");
+        assert_eq!(
+            listings[0].id,
+            "87dc03118c0a90f95957ae9b5495f322d2de521879fb97d093ad6a71dafcde68"
+        );
         assert_eq!(listings[0].price.as_ref().expect("price").amount, 5.0);
         assert_eq!(listings[0].price.as_ref().expect("price").currency, "chaos");
         assert_eq!(listings[0].account_name.as_deref(), Some("SGM#6552"));
         assert_eq!(listings[0].item.name.as_deref(), Some("Cataclysm Road"));
         assert_eq!(listings[0].item.item_level, Some(82));
         assert_eq!(listings[0].item.explicit_mods.len(), 2);
-        assert_eq!(listings[0].item.pseudo_mods, vec!["+45% total Elemental Resistance"]);
+        assert_eq!(
+            listings[0].item.pseudo_mods,
+            vec!["+45% total Elemental Resistance"]
+        );
 
         let serialized = serde_json::to_string(&listings[0]).expect("listing should serialize");
         assert!(!serialized.contains("hideout_token"));

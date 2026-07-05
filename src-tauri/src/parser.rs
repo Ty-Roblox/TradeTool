@@ -20,6 +20,12 @@ pub fn parse_item_text(raw_text: &str) -> Result<CapturedItem, String> {
     let identity_lines = identity_lines(header);
     let (item_name, base_type) = identity_from_lines(rarity.as_deref(), &identity_lines);
 
+    validate_item_shape(
+        item_class.as_deref(),
+        rarity.as_deref(),
+        base_type.as_deref(),
+    )?;
+
     let mut item_level = None;
     let mut quality = None;
     let mut sockets = None;
@@ -127,6 +133,33 @@ fn identity_from_lines(rarity: Option<&str>, lines: &[String]) -> (Option<String
     }
 }
 
+fn validate_item_shape(
+    item_class: Option<&str>,
+    rarity: Option<&str>,
+    base_type: Option<&str>,
+) -> Result<(), String> {
+    let mut missing = Vec::new();
+
+    if item_class.is_none() {
+        missing.push("Item Class");
+    }
+    if rarity.is_none() {
+        missing.push("Rarity");
+    }
+    if base_type.is_none() {
+        missing.push("item name/base type");
+    }
+
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "This does not look like copied POE2 item text. Missing: {}. Hover an item in Path of Exile 2 and press Ctrl+C, or use the capture hotkey.",
+            missing.join(", ")
+        ))
+    }
+}
+
 fn parse_first_i32(value: &str) -> Option<i32> {
     let number = value
         .chars()
@@ -204,5 +237,16 @@ Allies in your Presence have 10% increased Attack Speed (rune)
         assert_eq!(item.rarity.as_deref(), Some("Unique"));
         assert_eq!(item.item_name.as_deref(), Some("Crown of the Pale King"));
         assert_eq!(item.base_type.as_deref(), Some("Cultist Crown"));
+    }
+
+    #[test]
+    fn rejects_non_item_text_with_actionable_error() {
+        let error =
+            parse_item_text("https://www.pathofexile.com/trade2/search/poe2/Runes%20of%20Aldur")
+                .expect_err("trade urls should not parse as copied items");
+
+        assert!(error.contains("does not look like copied POE2 item text"));
+        assert!(error.contains("Item Class"));
+        assert!(error.contains("Rarity"));
     }
 }

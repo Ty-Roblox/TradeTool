@@ -1,5 +1,8 @@
-use crate::models::{CapturedItem, FilterCandidate, FilterGroup};
-use crate::trade::{mapped_explicit_modifier_indices, trade_filter_specs};
+use crate::models::{AppDiagnostic, CapturedItem, FilterCandidate, FilterGroup};
+use crate::trade::{
+    mapped_explicit_modifier_indices, should_show_unsupported_modifier, socket_count,
+    trade_filter_specs,
+};
 
 pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
     let mut groups = Vec::new();
@@ -70,13 +73,24 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
         });
     }
     if let Some(sockets) = &item.sockets {
-        misc.push(FilterCandidate {
-            id: "property:sockets".to_string(),
-            label: format!("Sockets: {sockets}"),
-            selected_by_default: false,
-            supported: false,
-            unsupported_reason: Some("Socket filters need POE2-specific trade mapping.".to_string()),
-        });
+        match socket_count(sockets) {
+            Some(count) => misc.push(FilterCandidate {
+                id: "property:sockets".to_string(),
+                label: format!("Sockets: {count}+ ({sockets})"),
+                selected_by_default: false,
+                supported: true,
+                unsupported_reason: None,
+            }),
+            None => misc.push(FilterCandidate {
+                id: "property:sockets".to_string(),
+                label: format!("Sockets: {sockets}"),
+                selected_by_default: false,
+                supported: false,
+                unsupported_reason: Some(
+                    "Socket filters need POE2-specific trade mapping.".to_string(),
+                ),
+            }),
+        }
     }
     if !misc.is_empty() {
         groups.push(FilterGroup {
@@ -92,6 +106,7 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
             .explicit_mods
             .iter()
             .filter(|modifier| !mapped_indices.contains(&modifier.index))
+            .filter(|modifier| should_show_unsupported_modifier(&modifier.text))
             .map(|modifier| FilterCandidate {
                 id: format!("explicit:{}", modifier.index),
                 label: modifier.text.clone(),
@@ -117,9 +132,36 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
     groups
 }
 
+pub fn generate_capture_diagnostics(groups: &[FilterGroup]) -> Vec<AppDiagnostic> {
+    groups
+        .iter()
+        .flat_map(|group| group.filters.iter())
+        .filter(|filter| !filter.supported)
+        .map(|filter| {
+            let code = if filter.id.starts_with("explicit:") {
+                "unmapped_modifier"
+            } else {
+                "unsupported_filter"
+            };
+            let detail = match filter.unsupported_reason.as_deref() {
+                Some(reason) if !reason.trim().is_empty() => {
+                    Some(format!("{}: {reason}", filter.label))
+                }
+                _ => Some(filter.label.clone()),
+            };
+
+            AppDiagnostic {
+                code: code.to_string(),
+                message: format!("Failed filter id {}", filter.id),
+                detail,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::filters::generate_filter_groups;
+    use crate::filters::{generate_capture_diagnostics, generate_filter_groups};
     use crate::parser::parse_item_text;
 
     const RARE_BODY_ARMOUR: &str = "Item Class: Body Armours
@@ -133,6 +175,52 @@ Item Level: 72
 --------
 +78 to maximum Life";
 
+    const UNIQUE_WITH_BOILERPLATE_MODS: &str = "Item Class: Body Armours
+Rarity: Unique
+Trial Shelter
+Expert Hexer's Robe
+--------
+Item Level: 82
+--------
+{ Enhancement }
+Allocates Zarokh's Gift -- Unscalable Value
+{ Implicit Modifier }
+40(39-44)% increased Evasion Rating
++114(100-119) to maximum Life
+Darkness howls through ancient bones, a wistful cry";
+
+    const RARE_WITH_UNMAPPED_MOD: &str = "Item Class: Body Armours
+Rarity: Rare
+Dread Shelter
+Expert Hexer's Robe
+--------
+Item Level: 72
+--------
+123% made up local nonsense";
+
+    const RARE_WITH_SOCKETS_AND_REDUCED_POISON_DURATION: &str = "Item Class: Boots
+Rarity: Rare
+Plague Slippers
+Bound Sandals
+--------
+Sockets: S S
+--------
+Item Level: 72
+--------
+59(60-56)% reduced Poison Duration on you";
+
+    const RARE_BELT_WITH_CHARM_SLOTS: &str = "Item Class: Belts
+Rarity: Rare
+Binding Buckle
+Mail Belt
+--------
+Item Level: 82
+--------
++114(100-119) to maximum Life
++17(17-18)% to all Elemental Resistances
++2 to Level of all Melee Skills
+Has 2(1-3) Charm Slots";
+
     #[test]
     fn creates_stable_filter_candidates_for_parsed_item() {
         let item = parse_item_text(RARE_BODY_ARMOUR).expect("item should parse");
@@ -142,15 +230,105 @@ Item Level: 72
             .flat_map(|group| group.filters.iter())
             .collect::<Vec<_>>();
 
-        assert!(filters.iter().any(|filter| filter.id == "identity:type" && !filter.selected_by_default));
-        assert!(filters.iter().any(|filter| filter.id == "misc:item_level" && !filter.selected_by_default));
-        assert!(filters.iter().any(|filter| filter.id == "property:quality" && !filter.selected_by_default));
+        assert!(filters
+            .iter()
+            .any(|filter| filter.id == "identity:type" && !filter.selected_by_default));
+        assert!(filters
+            .iter()
+            .any(|filter| filter.id == "misc:item_level" && !filter.selected_by_default));
+        assert!(filters
+            .iter()
+            .any(|filter| filter.id == "property:quality" && !filter.selected_by_default));
 
         let life_filter = filters
             .iter()
-            .find(|filter| filter.id == "explicit:0")
-            .expect("explicit modifier candidate");
-        assert_eq!(life_filter.label, "+78 to maximum Life");
-        assert!(!life_filter.supported);
+            .find(|filter| filter.id == "stat:explicit.stat_3299347043:0")
+            .expect("maximum life trade candidate");
+        assert!(life_filter.label.contains("maximum Life"));
+        assert!(life_filter.supported);
+        assert!(life_filter.selected_by_default);
+    }
+
+    #[test]
+    fn hides_non_searchable_boilerplate_from_unsupported_modifiers() {
+        let item =
+            parse_item_text(UNIQUE_WITH_BOILERPLATE_MODS).expect("unique body armour should parse");
+        let groups = generate_filter_groups(&item);
+        let filters = groups
+            .iter()
+            .flat_map(|group| group.filters.iter())
+            .collect::<Vec<_>>();
+        let labels = filters
+            .iter()
+            .map(|filter| filter.label.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(filters
+            .iter()
+            .any(|filter| filter.id == "stat:explicit.stat_124859000:3"));
+        assert!(filters
+            .iter()
+            .any(|filter| filter.id == "stat:explicit.stat_3299347043:4"));
+        assert!(filters
+            .iter()
+            .any(|filter| filter.id == "stat:explicit.stat_2954116742|11184:1"));
+        assert!(!labels.contains(&"{ Enhancement }"));
+        assert!(!labels.contains(&"{ Implicit Modifier }"));
+        assert!(!labels.iter().any(|label| label.contains("wistful cry")));
+    }
+
+    #[test]
+    fn emits_diagnostics_for_failed_filter_ids() {
+        let item = parse_item_text(RARE_WITH_UNMAPPED_MOD).expect("item should parse");
+        let groups = generate_filter_groups(&item);
+        let diagnostics = generate_capture_diagnostics(&groups);
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "unmapped_modifier"
+                && diagnostic.message.contains("explicit:0")
+                && diagnostic
+                    .detail
+                    .as_deref()
+                    .is_some_and(|detail| detail.contains("123% made up local nonsense"))
+        }));
+    }
+
+    #[test]
+    fn sockets_and_reduced_poison_duration_are_supported_filters() {
+        let item = parse_item_text(RARE_WITH_SOCKETS_AND_REDUCED_POISON_DURATION)
+            .expect("item should parse");
+        let groups = generate_filter_groups(&item);
+        let filters = groups
+            .iter()
+            .flat_map(|group| group.filters.iter())
+            .collect::<Vec<_>>();
+        let diagnostics = generate_capture_diagnostics(&groups);
+
+        assert!(filters.iter().any(|filter| {
+            filter.id == "property:sockets" && filter.supported && filter.label.contains("2+")
+        }));
+        assert!(filters
+            .iter()
+            .any(|filter| filter.id == "stat:explicit.stat_3301100256:0" && filter.supported));
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn ranged_charm_slots_are_supported_filters() {
+        let item = parse_item_text(RARE_BELT_WITH_CHARM_SLOTS).expect("item should parse");
+        let groups = generate_filter_groups(&item);
+        let filters = groups
+            .iter()
+            .flat_map(|group| group.filters.iter())
+            .collect::<Vec<_>>();
+        let diagnostics = generate_capture_diagnostics(&groups);
+
+        assert!(filters.iter().any(|filter| {
+            filter.id == "stat:explicit.stat_1416292992:3"
+                && filter.supported
+                && filter.selected_by_default
+                && filter.label.contains("Charm Slot")
+        }));
+        assert!(diagnostics.is_empty());
     }
 }

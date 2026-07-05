@@ -4,6 +4,7 @@
   import { relaunch } from "@tauri-apps/plugin-process";
   import { check } from "@tauri-apps/plugin-updater";
   import { onMount } from "svelte";
+  import quickJewelFilters from "$lib/quick-jewel-filters.json";
 
   type ItemProperty = {
     name: string;
@@ -42,10 +43,17 @@
     filters: FilterCandidate[];
   };
 
+  type AppDiagnostic = {
+    code: string;
+    message: string;
+    detail?: string;
+  };
+
   type CaptureResponse = {
     hotkey: string;
     item: CapturedItem;
     filterGroups: FilterGroup[];
+    diagnostics: AppDiagnostic[];
   };
 
   type TradeSearchResponse = {
@@ -57,6 +65,7 @@
     listings: TradeListing[];
     fetchUrl?: string;
     warning?: string;
+    diagnostics: AppDiagnostic[];
   };
 
   type TradeListing = {
@@ -84,11 +93,30 @@
     pseudoMods: string[];
   };
 
+  type QuickJewelStat = {
+    id: string;
+    label: string;
+    min?: number;
+  };
+
+  type QuickJewelFilter = {
+    id: string;
+    label: string;
+    baseType: string;
+    stats: QuickJewelStat[];
+  };
+
+  const quickJewels = quickJewelFilters as QuickJewelFilter[];
+
   let league = $state("Runes of Aldur");
   let rawText = $state("");
   let capture = $state<CaptureResponse | null>(null);
   let tradeResult = $state<TradeSearchResponse | null>(null);
   let selectedFilterIds = $state<string[]>([]);
+  let selectedQuickFilterIds = $state<string[]>([]);
+  let activeFilterTab = $state<"item" | "jewels">("jewels");
+  let activeJewelId = $state(quickJewels[0]?.id ?? "");
+  let quickStatId = $state(quickJewels[0]?.stats[0]?.id ?? "");
   let captureStatus = $state("Ready");
   let captureError = $state("");
   let searchStatus = $state("");
@@ -110,6 +138,7 @@
     }).then((unlisten) => unlisteners.push(unlisten));
 
     void listen<string>("capture_error", (event) => {
+      clearCurrentCapture();
       captureStatus = "Capture failed.";
       captureError = event.payload;
     }).then((unlisten) => unlisteners.push(unlisten));
@@ -135,6 +164,15 @@
     searchStatus = "";
     searchError = "";
     tradeResult = null;
+    activeFilterTab = "item";
+  }
+
+  function clearCurrentCapture() {
+    capture = null;
+    selectedFilterIds = [];
+    tradeResult = null;
+    searchStatus = "";
+    searchError = "";
   }
 
   async function captureNow() {
@@ -147,6 +185,7 @@
       const response = await invoke<CaptureResponse>("capture_item_now");
       applyCapture(response, "Captured from cursor.");
     } catch (error) {
+      clearCurrentCapture();
       captureStatus = "Capture failed.";
       captureError = readableError(error);
     }
@@ -159,6 +198,7 @@
     searchError = "";
 
     if (!rawText.trim()) {
+      clearCurrentCapture();
       captureStatus = "Paste item text.";
       captureError = "Manual item text is empty.";
       return;
@@ -168,14 +208,17 @@
       const response = await invoke<CaptureResponse>("parse_item_text", { rawText });
       applyCapture(response, "Parsed pasted item.");
     } catch (error) {
+      clearCurrentCapture();
       captureStatus = "Parse failed.";
       captureError = readableError(error);
     }
   }
 
   async function searchTrade() {
-    if (!capture) {
-      searchError = "Capture or paste an item before searching.";
+    const filterIds = combinedSelectedFilterIds();
+
+    if (filterIds.length === 0) {
+      searchError = "Select at least one item or quick filter before searching.";
       return;
     }
 
@@ -187,8 +230,8 @@
       const result = await invoke<TradeSearchResponse>("search_trade", {
         request: {
           league,
-          rawText: capture.item.rawText,
-          selectedFilterIds
+          rawText: capture?.item.rawText ?? "",
+          selectedFilterIds: filterIds
         }
       });
 
@@ -198,6 +241,7 @@
     } catch (error) {
       searchStatus = "Search unavailable.";
       searchError = readableError(error);
+      tradeResult = null;
     } finally {
       searching = false;
     }
@@ -253,10 +297,102 @@
     selectedFilterIds = checked
       ? Array.from(new Set([...selectedFilterIds, id]))
       : selectedFilterIds.filter((selectedId) => selectedId !== id);
+    clearSearchResult();
   }
 
   function isSelected(id: string) {
     return selectedFilterIds.includes(id);
+  }
+
+  function combinedSelectedFilterIds() {
+    return Array.from(new Set([...selectedFilterIds, ...selectedQuickFilterIds]));
+  }
+
+  function selectedFilterCount() {
+    return combinedSelectedFilterIds().length;
+  }
+
+  function activeJewel() {
+    return quickJewels.find((jewel) => jewel.id === activeJewelId) ?? quickJewels[0];
+  }
+
+  function quickBaseFilterId(jewelId: string) {
+    return `quick:jewel:${jewelId}:base`;
+  }
+
+  function quickStatFilterId(jewelId: string, statId: string) {
+    return `quick:jewel:${jewelId}:stat:${statId}`;
+  }
+
+  function selectQuickJewel(jewelId: string) {
+    const switching = activeJewelId !== jewelId;
+    activeJewelId = jewelId;
+
+    const jewel = activeJewel();
+    quickStatId = jewel?.stats[0]?.id ?? "";
+
+    const nextFilters = switching
+      ? selectedQuickFilterIds.filter((id) => !id.startsWith("quick:jewel:"))
+      : selectedQuickFilterIds;
+
+    selectedQuickFilterIds = Array.from(new Set([...nextFilters, quickBaseFilterId(jewelId)]));
+    activeFilterTab = "jewels";
+    clearSearchResult();
+  }
+
+  function addQuickJewelStat() {
+    const jewel = activeJewel();
+    if (!jewel || !quickStatId) {
+      return;
+    }
+
+    selectedQuickFilterIds = Array.from(
+      new Set([
+        ...selectedQuickFilterIds,
+        quickBaseFilterId(jewel.id),
+        quickStatFilterId(jewel.id, quickStatId)
+      ])
+    );
+    clearSearchResult();
+  }
+
+  function removeQuickFilter(id: string) {
+    const parts = id.split(":");
+    const jewelId = parts[2];
+
+    selectedQuickFilterIds =
+      parts[3] === "base"
+        ? selectedQuickFilterIds.filter((filterId) => !filterId.startsWith(`quick:jewel:${jewelId}:`))
+        : selectedQuickFilterIds.filter((filterId) => filterId !== id);
+
+    clearSearchResult();
+  }
+
+  function quickFilterLabel(id: string) {
+    const parts = id.split(":");
+    const jewel = quickJewels.find((candidate) => candidate.id === parts[2]);
+
+    if (!jewel) {
+      return id;
+    }
+
+    if (parts[3] === "base") {
+      return `${jewel.label} base`;
+    }
+
+    const statId = parts.slice(4).join(":");
+    const stat = jewel.stats.find((candidate) => candidate.id === statId);
+    return stat ? `${jewel.label}: ${stat.label}` : id;
+  }
+
+  function isQuickBaseSelected(jewelId: string) {
+    return selectedQuickFilterIds.includes(quickBaseFilterId(jewelId));
+  }
+
+  function clearSearchResult() {
+    tradeResult = null;
+    searchStatus = "";
+    searchError = "";
   }
 
   function updateLeague(event: Event) {
@@ -301,55 +437,179 @@
 
 <main class="app-shell">
   <header class="topbar">
-    <div>
-      <h1>POE2 Trade Tool</h1>
-      <p>{capture?.hotkey ?? "F8"} capture</p>
+    <div class="brand-lockup">
+      <div class="brand-mark">T</div>
+      <div>
+        <h1>TradeProject</h1>
+        <p>POE2 trade search workspace</p>
+      </div>
     </div>
 
-    <label class="league-field">
-      <span>League</span>
-      <input value={league} oninput={updateLeague} />
-    </label>
+    <nav class="topnav" aria-label="Workspace sections">
+      <a href="#capture">Capture</a>
+      <a href="#filters">Filters</a>
+      <a href="#results">Results</a>
+    </nav>
+
+    <div class="topbar-controls">
+      <div class="status-pill">
+        <span>Hotkey</span>
+        <strong>{capture?.hotkey ?? "F8"}</strong>
+      </div>
+
+      <label class="league-field">
+        <span>League</span>
+        <input value={league} oninput={updateLeague} />
+      </label>
+    </div>
   </header>
 
   <section class="workspace">
-    <aside class="capture-panel">
-      <div class="section-heading">
-        <h2>Capture</h2>
-        <span>{captureStatus}</span>
+    <aside class="capture-panel" id="capture">
+      <div class="composer-intro">
+        <span class="eyebrow">Item input</span>
+        <h2>What do you want to price?</h2>
+        <p>Capture from the game or paste copied item text.</p>
       </div>
 
-      <button class="primary-action" type="button" onclick={captureNow}>Capture Item</button>
+      <div class="prompt-chips" aria-label="Trade workflow">
+        <span>Capture</span>
+        <span>Parse</span>
+        <span>Filter</span>
+        <span>Search</span>
+      </div>
 
       {#if captureError}
-        <p class="error">{captureError}</p>
+        <div class="notice-card error-card">
+          <strong>{captureStatus}</strong>
+          <p>{captureError}</p>
+        </div>
       {/if}
 
-      <label class="manual-input">
-        <span>Manual Paste</span>
-        <textarea bind:value={rawText} spellcheck="false"></textarea>
-      </label>
+      <div class="composer-card">
+        <label class="manual-input">
+          <span>Manual Paste</span>
+          <textarea
+            bind:value={rawText}
+            spellcheck="false"
+            placeholder="Paste copied POE2 item text here..."
+          ></textarea>
+        </label>
 
-      <button class="secondary-action" type="button" onclick={parseManual}>Parse Paste</button>
+        <div class="composer-actions">
+          <button class="primary-action" type="button" onclick={captureNow}>Capture Item</button>
+          <button class="secondary-action" type="button" onclick={parseManual}>Parse Paste</button>
+          <span>{captureStatus}</span>
+        </div>
+      </div>
 
       <div class="update-line">
         <span>Updater</span>
         <strong>{updateStatus}</strong>
       </div>
       {#if updateError}
-        <p class="error compact">{updateError}</p>
+        <div class="notice-card error-card compact">
+          <strong>Updater</strong>
+          <p>{updateError}</p>
+        </div>
       {/if}
     </aside>
 
-    <section class="item-panel">
-      <div class="section-heading">
-        <h2>{capture?.item.itemName ?? capture?.item.baseType ?? "No item captured"}</h2>
-        {#if capture?.item.rarity}
-          <span>{capture.item.rarity}</span>
-        {/if}
+    <section class="item-panel" id="filters">
+      <div class="workspace-heading">
+        <div>
+          <span class="eyebrow">Generated query</span>
+          <h2>{capture?.item.itemName ?? capture?.item.baseType ?? "No item captured"}</h2>
+        </div>
+        <div class="heading-pills">
+          {#if capture?.item.rarity}
+            <span>{capture.item.rarity}</span>
+          {/if}
+          <span>{selectedFilterCount()} selected</span>
+        </div>
       </div>
 
-      {#if capture}
+      <div class="filter-tabs" role="tablist" aria-label="Filter modes">
+        <button
+          class:active-tab={activeFilterTab === "jewels"}
+          type="button"
+          role="tab"
+          aria-selected={activeFilterTab === "jewels"}
+          onclick={() => (activeFilterTab = "jewels")}
+        >
+          Quick Jewels
+        </button>
+        <button
+          class:active-tab={activeFilterTab === "item"}
+          type="button"
+          role="tab"
+          aria-selected={activeFilterTab === "item"}
+          disabled={!capture}
+          onclick={() => (activeFilterTab = "item")}
+        >
+          Item Filters
+        </button>
+      </div>
+
+      {#if activeFilterTab === "jewels"}
+        <section class="quick-filter-panel">
+          <div class="quick-filter-heading">
+            <div>
+              <span class="eyebrow">Quick filter</span>
+              <h3>{activeJewel()?.label ?? "Jewels"}</h3>
+            </div>
+            <span>{activeJewel()?.stats.length ?? 0} stats</span>
+          </div>
+
+          <div class="jewel-picker" aria-label="Jewel bases">
+            {#each quickJewels as jewel}
+              <button
+                class:jewel-active={activeJewelId === jewel.id || isQuickBaseSelected(jewel.id)}
+                type="button"
+                onclick={() => selectQuickJewel(jewel.id)}
+              >
+                <strong>{jewel.label}</strong>
+                <span>{jewel.stats.length ? `${jewel.stats.length} stats` : "base only"}</span>
+              </button>
+            {/each}
+          </div>
+
+          <div class="quick-builder">
+            <label>
+              <span>Stat</span>
+              <select bind:value={quickStatId} disabled={!activeJewel()?.stats.length}>
+                {#each activeJewel()?.stats ?? [] as stat}
+                  <option value={stat.id}>
+                    {stat.label}{stat.min ? ` (${stat.min}+ default)` : ""}
+                  </option>
+                {/each}
+              </select>
+            </label>
+            <button class="secondary-action" type="button" onclick={() => selectQuickJewel(activeJewelId)}>
+              Set Base
+            </button>
+            <button
+              class="primary-action"
+              type="button"
+              onclick={addQuickJewelStat}
+              disabled={!quickStatId || searching}
+            >
+              Add Stat
+            </button>
+          </div>
+
+          {#if selectedQuickFilterIds.length}
+            <div class="quick-chip-list" aria-label="Selected quick filters">
+              {#each selectedQuickFilterIds as id}
+                <button class="quick-chip" type="button" onclick={() => removeQuickFilter(id)}>
+                  <span>{quickFilterLabel(id)}</span>
+                  <strong>Remove</strong>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </section>
+      {:else if capture}
         <div class="item-summary">
           <div>
             <span>Base</span>
@@ -369,10 +629,37 @@
           </div>
         </div>
 
+        {#if capture.diagnostics.length}
+          <section class="diagnostics-panel">
+            <div class="diagnostics-heading">
+              <h3>Diagnostics</h3>
+              <span>
+                {capture.diagnostics.length === 1
+                  ? "1 failed id"
+                  : `${capture.diagnostics.length} failed ids`}
+              </span>
+            </div>
+            <div class="diagnostic-list">
+              {#each capture.diagnostics as diagnostic}
+                <article class="diagnostic-row">
+                  <code>{diagnostic.code}</code>
+                  <strong>{diagnostic.message}</strong>
+                  {#if diagnostic.detail}
+                    <p>{diagnostic.detail}</p>
+                  {/if}
+                </article>
+              {/each}
+            </div>
+          </section>
+        {/if}
+
         <div class="filters">
           {#each capture.filterGroups as group}
             <section class="filter-group">
-              <h3>{group.label}</h3>
+              <div class="filter-group-heading">
+                <h3>{group.label}</h3>
+                <span>{group.filters.length}</span>
+              </div>
               {#each group.filters as filter}
                 <label class:unsupported={!filter.supported} class="filter-row">
                   <input
@@ -392,107 +679,133 @@
           {/each}
         </div>
 
-        <div class="actions">
-          <button
-            class="primary-action"
-            type="button"
-            onclick={searchTrade}
-            disabled={searching || selectedFilterIds.length === 0}
-          >
-            {searching ? "Searching..." : "Search Trade"}
-          </button>
-          {#if tradeResult}
-            <button class="secondary-action" type="button" onclick={openOfficialSearch}>
-              Open Official Search
-            </button>
-          {/if}
-          {#if tradeResult?.warning}
-            <button class="secondary-action" type="button" onclick={searchTrade} disabled={searching}>
-              Retry
-            </button>
-          {/if}
-          <span>{selectedFilterIds.length} selected</span>
+      {:else}
+        <div class="empty-state">
+          <span class="empty-mark">T</span>
+          <h3>Start with an item</h3>
+          <p>Capture an item or paste copied item text.</p>
         </div>
+      {/if}
 
-        {#if searchStatus}
-          <p class="status-text">{searchStatus}</p>
-        {/if}
-        {#if searchError}
-          <p class="error">{searchError}</p>
-        {/if}
-
+      <div class="actions">
+        <button
+          class="primary-action"
+          type="button"
+          onclick={searchTrade}
+          disabled={searching || selectedFilterCount() === 0}
+        >
+          {searching ? "Searching..." : "Search Trade"}
+        </button>
         {#if tradeResult}
-          <section class="results-panel">
-            <div class="results-heading">
-              <div>
-                <h3>{tradeResult.total} matches</h3>
-                <p>{tradeResult.fetchedCount} listings loaded from the first page</p>
-              </div>
-              <span>{tradeResult.searchId}</span>
+          <button class="secondary-action" type="button" onclick={openOfficialSearch}>
+            Open Official Search
+          </button>
+        {/if}
+        {#if tradeResult?.warning}
+          <button class="secondary-action" type="button" onclick={searchTrade} disabled={searching}>
+            Retry
+          </button>
+        {/if}
+        <span>{selectedFilterCount()} selected</span>
+      </div>
+
+      {#if searchStatus}
+        <p class="status-text">{searchStatus}</p>
+      {/if}
+      {#if searchError}
+        <div class="notice-card error-card search-error">
+          <strong>{searchStatus || "Search failed"}</strong>
+          <p>{searchError}</p>
+        </div>
+      {/if}
+
+      {#if tradeResult}
+        <section class="results-panel" id="results">
+          <div class="results-heading">
+            <div>
+              <h3>{tradeResult.total} matches</h3>
+              <p>{tradeResult.fetchedCount} listings loaded from the first page</p>
             </div>
+            <span>{tradeResult.searchId}</span>
+          </div>
 
-            {#if tradeResult.warning}
-              <p class="warning">{tradeResult.warning}</p>
-            {/if}
+          {#if tradeResult.warning}
+            <p class="warning">{tradeResult.warning}</p>
+          {/if}
 
-            {#if tradeResult.listings.length}
-              <div class="listing-list">
-                {#each tradeResult.listings as listing}
-                  <article class="listing-row">
-                    <div class="listing-image">
-                      {#if listing.item.icon}
-                        <img src={listing.item.icon} alt="" loading="lazy" />
-                      {:else}
-                        <span></span>
-                      {/if}
-                    </div>
-
-                    <div class="listing-body">
-                      <div class="listing-title">
-                        <div>
-                          <h4>{listingTitle(listing)}</h4>
-                          <p>{listingSubtitle(listing)}</p>
-                        </div>
-                        <strong>{formatPrice(listing.price)}</strong>
-                      </div>
-
-                      <div class="seller-line">
-                        <span>{listing.accountName ?? "Unknown seller"}</span>
-                        {#if listing.indexed}
-                          <span>{listing.indexed}</span>
-                        {/if}
-                      </div>
-
-                      {#if listing.item.pseudoMods.length}
-                        <div class="mod-list pseudo-mods">
-                          {#each listing.item.pseudoMods as mod}
-                            <span>{mod}</span>
-                          {/each}
-                        </div>
-                      {/if}
-
-                      {#if listing.item.explicitMods.length}
-                        <div class="mod-list">
-                          {#each listing.item.explicitMods as mod}
-                            <span>{mod}</span>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
+          {#if tradeResult.diagnostics.length}
+            <section class="diagnostics-panel search-diagnostics">
+              <div class="diagnostics-heading">
+                <h3>Search Diagnostics</h3>
+                <span>{tradeResult.diagnostics.length}</span>
+              </div>
+              <div class="diagnostic-list">
+                {#each tradeResult.diagnostics as diagnostic}
+                  <article class="diagnostic-row">
+                    <code>{diagnostic.code}</code>
+                    <strong>{diagnostic.message}</strong>
+                    {#if diagnostic.detail}
+                      <p>{diagnostic.detail}</p>
+                    {/if}
                   </article>
                 {/each}
               </div>
-            {:else}
-              <div class="results-empty">
-                <p>No listings were loaded in-app.</p>
-              </div>
-            {/if}
-          </section>
-        {/if}
-      {:else}
-        <div class="empty-state">
-          <p>Capture an item or paste copied item text.</p>
-        </div>
+            </section>
+          {/if}
+
+          {#if tradeResult.listings.length}
+            <div class="listing-list">
+              {#each tradeResult.listings as listing}
+                <article class="listing-row">
+                  <div class="listing-image">
+                    {#if listing.item.icon}
+                      <img src={listing.item.icon} alt="" loading="lazy" />
+                    {:else}
+                      <span></span>
+                    {/if}
+                  </div>
+
+                  <div class="listing-body">
+                    <div class="listing-title">
+                      <div>
+                        <h4>{listingTitle(listing)}</h4>
+                        <p>{listingSubtitle(listing)}</p>
+                      </div>
+                      <strong>{formatPrice(listing.price)}</strong>
+                    </div>
+
+                    <div class="seller-line">
+                      <span>{listing.accountName ?? "Unknown seller"}</span>
+                      {#if listing.indexed}
+                        <span>{listing.indexed}</span>
+                      {/if}
+                    </div>
+
+                    {#if listing.item.pseudoMods.length}
+                      <div class="mod-list pseudo-mods">
+                        {#each listing.item.pseudoMods as mod}
+                          <span>{mod}</span>
+                        {/each}
+                      </div>
+                    {/if}
+
+                    {#if listing.item.explicitMods.length}
+                      <div class="mod-list">
+                        {#each listing.item.explicitMods as mod}
+                          <span>{mod}</span>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+                </article>
+              {/each}
+            </div>
+          {:else}
+            <div class="results-empty">
+              <p>No listings were loaded in-app.</p>
+            </div>
+          {/if}
+        </section>
       {/if}
     </section>
   </section>
@@ -502,18 +815,42 @@
   :root {
     font-family:
       Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    color: #171d19;
-    background: #f1f3ef;
+    color: #f4efe6;
+    background: #090a0b;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    --background: #090a0b;
+    --surface: #111315;
+    --surface-subtle: #171a1d;
+    --surface-muted: #1f2428;
+    --ink: #f4efe6;
+    --ink-soft: #d7d0c3;
+    --muted: #9ba3ad;
+    --line: #2a3035;
+    --line-strong: #3a4248;
+    --field: #0d0f11;
+    --primary: #d6b36a;
+    --primary-hover: #e4c77e;
+    --danger: #f87171;
+    --danger-bg: #2a1417;
+    --warning: #f0b45b;
+    --warning-bg: #261a0d;
+    --success: #62d394;
+    --blue: #6db7ff;
+    --shadow-soft: 0 16px 44px rgba(0, 0, 0, 0.36);
+    --shadow-card: 0 10px 26px rgba(0, 0, 0, 0.24);
   }
 
   :global(body) {
     min-width: 320px;
     min-height: 100vh;
     margin: 0;
+    background:
+      radial-gradient(circle at 18% 0%, rgba(214, 179, 106, 0.16), transparent 30rem),
+      radial-gradient(circle at 82% 12%, rgba(45, 159, 137, 0.11), transparent 28rem),
+      linear-gradient(180deg, #111315 0%, var(--background) 22rem);
   }
 
   button,
@@ -523,14 +860,31 @@
   }
 
   button {
-    border: 0;
+    border: 1px solid transparent;
     border-radius: 8px;
     cursor: pointer;
+    transition:
+      background 140ms ease,
+      border-color 140ms ease,
+      color 140ms ease,
+      box-shadow 140ms ease;
   }
 
   button:disabled {
     cursor: not-allowed;
-    opacity: 0.55;
+    opacity: 0.5;
+  }
+
+  button:not(:disabled):hover {
+    box-shadow: var(--shadow-card);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  p {
+    margin: 0;
   }
 
   .app-shell {
@@ -544,46 +898,140 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    padding: 18px 24px;
-    border-bottom: 1px solid #d4dbd2;
-    background: #ffffff;
+    min-height: 64px;
+    padding: 0 22px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(12, 14, 16, 0.88);
+    backdrop-filter: blur(18px);
+    position: sticky;
+    top: 0;
+    z-index: 10;
   }
 
-  h1,
-  h2,
-  h3,
-  p {
-    margin: 0;
+  .brand-lockup,
+  .topbar-controls,
+  .actions,
+  .seller-line {
+    display: flex;
+    align-items: center;
+  }
+
+  .brand-lockup {
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .brand-mark {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    border: 1px solid var(--ink);
+    border-radius: 8px;
+    color: #111315;
+    background: var(--primary);
+    font-size: 0.84rem;
+    font-weight: 800;
   }
 
   h1 {
-    font-size: 1.25rem;
+    font-size: 0.96rem;
     line-height: 1.2;
   }
 
+  .brand-lockup p,
+  .eyebrow,
   .topbar p,
-  .section-heading span,
   .item-summary span,
   .update-line span,
-  .actions span {
-    color: #637069;
+  .actions span,
+  .filter-group-heading span,
+  .diagnostics-heading span {
+    color: var(--muted);
+    font-size: 0.78rem;
+  }
+
+  .eyebrow {
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: uppercase;
+  }
+
+  .topnav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-subtle);
+  }
+
+  .topnav a {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 10px;
+    border-radius: 6px;
+    color: var(--muted);
     font-size: 0.82rem;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .topnav a:hover {
+    color: var(--ink);
+    background: var(--surface);
+  }
+
+  .topbar-controls {
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .status-pill {
+    display: grid;
+    gap: 2px;
+    min-width: 72px;
+    padding: 6px 9px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+  }
+
+  .status-pill span,
+  .league-field {
+    color: var(--muted);
+    font-size: 0.76rem;
+  }
+
+  .status-pill strong {
+    color: var(--ink);
+    font-size: 0.9rem;
   }
 
   .league-field {
     display: grid;
     gap: 4px;
     min-width: 180px;
-    color: #637069;
-    font-size: 0.78rem;
   }
 
   .league-field input,
   .manual-input textarea {
-    border: 1px solid #cad5ce;
+    border: 1px solid var(--line);
     border-radius: 8px;
-    background: #ffffff;
-    color: #171d19;
+    background: var(--field);
+    color: var(--ink);
+    outline: none;
+  }
+
+  .league-field input:focus,
+  .manual-input textarea:focus {
+    border-color: var(--ink);
+    box-shadow: 0 0 0 3px rgba(214, 179, 106, 0.18);
   }
 
   .league-field input {
@@ -593,71 +1041,142 @@
 
   .workspace {
     display: grid;
-    grid-template-columns: minmax(280px, 360px) 1fr;
-    gap: 20px;
-    padding: 20px;
+    grid-template-columns: minmax(320px, 410px) minmax(0, 1fr);
+    gap: 16px;
+    width: min(1520px, calc(100vw - 32px));
+    margin: 0 auto;
+    padding: 18px 0 30px;
   }
 
   .capture-panel,
   .item-panel {
-    border: 1px solid #d2dbd5;
+    border: 1px solid var(--line);
     border-radius: 8px;
-    background: #ffffff;
+    background: var(--surface);
+    box-shadow: var(--shadow-soft);
   }
 
   .capture-panel {
     align-self: start;
     display: grid;
-    gap: 14px;
-    padding: 16px;
+    gap: 12px;
+    padding: 14px;
+    position: sticky;
+    top: 82px;
   }
 
   .item-panel {
     min-height: 520px;
-    padding: 18px;
+    padding: 16px;
   }
 
-  .section-heading {
+  .composer-intro {
+    display: grid;
+    gap: 4px;
+    padding: 8px 4px 4px;
+  }
+
+  .composer-intro h2 {
+    font-size: clamp(1.45rem, 2vw, 1.9rem);
+    line-height: 1.05;
+  }
+
+  .composer-intro p {
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  .prompt-chips {
     display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #e0e6e1;
+    flex-wrap: wrap;
+    gap: 6px;
   }
 
-  .section-heading h2 {
-    font-size: 1rem;
+  .prompt-chips span,
+  .heading-pills span,
+  .actions span {
+    min-height: 26px;
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--muted);
+    padding: 0 9px;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .composer-card {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+  }
+
+  .composer-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px;
+    border-top: 1px solid var(--line);
+    background: var(--surface-subtle);
+  }
+
+  .composer-actions span {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 0.78rem;
   }
 
   .primary-action,
   .secondary-action {
-    min-height: 40px;
+    min-height: 36px;
     padding: 0 14px;
     font-weight: 700;
   }
 
   .primary-action {
-    color: #ffffff;
-    background: #28684f;
+    color: #111315;
+    background: var(--primary);
   }
 
   .secondary-action {
-    color: #20392f;
-    background: #ddebe3;
+    border-color: var(--line);
+    color: var(--ink);
+    background: var(--surface);
+  }
+
+  .primary-action:not(:disabled):hover {
+    background: var(--primary-hover);
+  }
+
+  .secondary-action:not(:disabled):hover {
+    border-color: var(--line-strong);
+    background: var(--surface-subtle);
   }
 
   .manual-input {
     display: grid;
     gap: 6px;
-    color: #637069;
+    color: var(--muted);
     font-size: 0.82rem;
   }
 
+  .manual-input span {
+    padding: 10px 10px 0;
+    font-weight: 700;
+  }
+
   .manual-input textarea {
-    min-height: 220px;
+    min-height: 250px;
     resize: vertical;
     padding: 10px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
     line-height: 1.35;
     white-space: pre;
   }
@@ -666,9 +1185,204 @@
     display: flex;
     justify-content: space-between;
     gap: 10px;
-    padding-top: 8px;
-    border-top: 1px solid #e0e6e1;
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-subtle);
     font-size: 0.82rem;
+  }
+
+  .update-line span {
+    color: var(--muted);
+  }
+
+  .update-line strong {
+    color: var(--ink);
+    text-align: right;
+  }
+
+  .workspace-heading {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .workspace-heading h2 {
+    margin-top: 4px;
+    font-size: clamp(1.25rem, 2vw, 1.75rem);
+    line-height: 1.1;
+  }
+
+  .filter-tabs {
+    display: flex;
+    gap: 4px;
+    width: fit-content;
+    max-width: 100%;
+    margin: 14px 0;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-subtle);
+  }
+
+  .filter-tabs button {
+    min-height: 34px;
+    padding: 0 12px;
+    border-color: transparent;
+    color: var(--muted);
+    background: transparent;
+    font-size: 0.82rem;
+    font-weight: 800;
+  }
+
+  .filter-tabs button.active-tab {
+    border-color: var(--line);
+    color: var(--ink);
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
+  }
+
+  .quick-filter-panel {
+    display: grid;
+    gap: 14px;
+    margin-top: 4px;
+  }
+
+  .quick-filter-heading {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid rgba(214, 179, 106, 0.34);
+    border-radius: 8px;
+    background:
+      linear-gradient(135deg, rgba(214, 179, 106, 0.16), rgba(45, 159, 137, 0.12)),
+      var(--surface);
+  }
+
+  .quick-filter-heading h3 {
+    margin-top: 4px;
+    color: var(--ink);
+    font-size: 1.1rem;
+  }
+
+  .quick-filter-heading > span {
+    display: inline-flex;
+    min-height: 28px;
+    align-items: center;
+    padding: 0 10px;
+    border: 1px solid rgba(214, 179, 106, 0.32);
+    border-radius: 8px;
+    color: #f2d89a;
+    background: rgba(214, 179, 106, 0.12);
+    font-size: 0.78rem;
+    font-weight: 800;
+  }
+
+  .jewel-picker {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px;
+  }
+
+  .jewel-picker button {
+    display: grid;
+    gap: 5px;
+    min-height: 68px;
+    padding: 11px;
+    border-color: var(--line);
+    color: var(--ink);
+    background: var(--surface);
+    text-align: left;
+  }
+
+  .jewel-picker button:hover,
+  .jewel-picker button.jewel-active {
+    border-color: var(--primary);
+    background: rgba(214, 179, 106, 0.12);
+  }
+
+  .jewel-picker strong,
+  .quick-chip span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .jewel-picker span {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+
+  .quick-builder {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto auto;
+    gap: 10px;
+    align-items: end;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-subtle);
+  }
+
+  .quick-builder label {
+    display: grid;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-weight: 800;
+  }
+
+  .quick-builder select {
+    width: 100%;
+    min-height: 38px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--ink);
+    background: var(--surface);
+    outline: none;
+  }
+
+  .quick-builder select:focus {
+    border-color: var(--ink);
+    box-shadow: 0 0 0 3px rgba(214, 179, 106, 0.18);
+  }
+
+  .quick-chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .quick-chip {
+    display: inline-flex;
+    max-width: 100%;
+    min-height: 34px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 9px;
+    border-color: rgba(45, 159, 137, 0.46);
+    color: #d9fff5;
+    background: rgba(45, 159, 137, 0.14);
+    font-size: 0.78rem;
+    font-weight: 800;
+  }
+
+  .quick-chip strong {
+    color: #8ee6d4;
+    font-size: 0.72rem;
+  }
+
+  .heading-pills {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
   }
 
   .item-summary {
@@ -682,9 +1396,14 @@
     display: grid;
     gap: 4px;
     padding: 10px;
-    border: 1px solid #d8e0da;
+    border: 1px solid var(--line);
     border-radius: 8px;
-    background: #f7faf6;
+    background: var(--surface-subtle);
+  }
+
+  .item-summary strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .filters {
@@ -697,9 +1416,31 @@
     gap: 8px;
   }
 
+  .filter-group-heading,
+  .diagnostics-heading,
+  .results-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
   .filter-group h3 {
-    color: #33453b;
+    color: #f4efe6;
     font-size: 0.86rem;
+  }
+
+  .filter-group-heading span,
+  .diagnostics-heading span {
+    display: inline-grid;
+    min-width: 28px;
+    min-height: 22px;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface-subtle);
+    color: var(--muted);
+    font-weight: 800;
   }
 
   .filter-row {
@@ -707,58 +1448,154 @@
     grid-template-columns: 18px 1fr;
     gap: 8px 10px;
     align-items: start;
-    padding: 8px 10px;
-    border: 1px solid #dde5df;
+    min-height: 44px;
+    padding: 10px;
+    border: 1px solid var(--line);
     border-radius: 8px;
-    background: #fbfcfa;
+    background: var(--surface);
+    color: var(--ink-soft);
+    transition:
+      border-color 120ms ease,
+      background 120ms ease;
+  }
+
+  .filter-row:hover {
+    border-color: var(--line-strong);
+    background: var(--surface-subtle);
   }
 
   .filter-row input {
     width: 16px;
     height: 16px;
     margin: 2px 0 0;
+    accent-color: var(--primary);
+  }
+
+  .filter-row span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
   }
 
   .filter-row small {
     grid-column: 2;
-    color: #8a5a37;
+    color: var(--warning);
     line-height: 1.3;
   }
 
   .filter-row.unsupported {
-    color: #68716c;
-    background: #f2f5f1;
+    color: var(--muted);
+    background: var(--surface-subtle);
   }
 
   .actions {
-    display: flex;
-    align-items: center;
     flex-wrap: wrap;
     gap: 12px;
     margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
   }
 
   .status-text {
     margin-top: 12px;
-    color: #28684f;
+    color: var(--success);
+    font-weight: 700;
   }
 
-  .error {
-    color: #9e2f2f;
+  .notice-card {
+    display: grid;
+    gap: 4px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
     line-height: 1.35;
   }
 
-  .error.compact {
+  .notice-card strong {
+    font-size: 0.84rem;
+  }
+
+  .notice-card p {
+    overflow-wrap: anywhere;
+  }
+
+  .error-card {
+    border-color: rgba(248, 113, 113, 0.34);
+    color: #fecaca;
+    background: var(--danger-bg);
+  }
+
+  .compact {
     font-size: 0.78rem;
+  }
+
+  .search-error {
+    margin-top: 12px;
   }
 
   .warning {
     padding: 10px 12px;
-    border: 1px solid #e0c59e;
+    border: 1px solid rgba(240, 180, 91, 0.34);
     border-radius: 8px;
-    color: #714b1c;
-    background: #fff8e9;
+    color: #fde68a;
+    background: var(--warning-bg);
     line-height: 1.35;
+  }
+
+  .diagnostics-panel {
+    display: grid;
+    gap: 10px;
+    margin: 14px 0;
+    padding: 12px;
+    border: 1px solid rgba(248, 113, 113, 0.34);
+    border-radius: 8px;
+    background: var(--danger-bg);
+  }
+
+  .diagnostics-heading h3 {
+    color: #fecaca;
+    font-size: 0.88rem;
+  }
+
+  .diagnostic-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .diagnostic-row {
+    display: grid;
+    gap: 5px;
+    padding: 9px 10px;
+    border: 1px solid rgba(248, 113, 113, 0.24);
+    border-radius: 8px;
+    background: var(--surface);
+  }
+
+  .diagnostic-row code {
+    width: fit-content;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    padding: 2px 6px;
+    border: 1px solid rgba(248, 113, 113, 0.34);
+    border-radius: 6px;
+    color: #fecaca;
+    background: rgba(248, 113, 113, 0.09);
+    font-size: 0.76rem;
+  }
+
+  .diagnostic-row strong,
+  .diagnostic-row p {
+    overflow-wrap: anywhere;
+  }
+
+  .diagnostic-row p {
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.35;
+  }
+
+  .search-diagnostics {
+    margin: 0;
   }
 
   .results-panel {
@@ -766,14 +1603,7 @@
     gap: 12px;
     margin-top: 20px;
     padding-top: 16px;
-    border-top: 1px solid #e0e6e1;
-  }
-
-  .results-heading {
-    display: flex;
-    align-items: start;
-    justify-content: space-between;
-    gap: 12px;
+    border-top: 1px solid var(--line);
   }
 
   .results-heading h3,
@@ -786,8 +1616,14 @@
   .listing-title p,
   .seller-line,
   .results-empty {
-    color: #637069;
+    color: var(--muted);
     font-size: 0.82rem;
+  }
+
+  .results-heading span {
+    max-width: 42%;
+    overflow-wrap: anywhere;
+    text-align: right;
   }
 
   .listing-list {
@@ -797,27 +1633,28 @@
 
   .listing-row {
     display: grid;
-    grid-template-columns: 74px 1fr;
+    grid-template-columns: 78px minmax(0, 1fr);
     gap: 12px;
     padding: 12px;
-    border: 1px solid #dde5df;
+    border: 1px solid var(--line);
     border-radius: 8px;
-    background: #fbfcfa;
+    background: var(--surface);
+    box-shadow: var(--shadow-card);
   }
 
   .listing-image {
     display: grid;
-    width: 74px;
-    min-height: 74px;
+    width: 78px;
+    min-height: 78px;
     place-items: center;
-    border: 1px solid #d8e0da;
+    border: 1px solid var(--line);
     border-radius: 8px;
-    background: #eef3ef;
+    background: var(--surface-subtle);
   }
 
   .listing-image img {
-    max-width: 64px;
-    max-height: 64px;
+    max-width: 66px;
+    max-height: 66px;
     object-fit: contain;
   }
 
@@ -837,19 +1674,20 @@
   .listing-title h4 {
     font-size: 0.95rem;
     line-height: 1.25;
+    overflow-wrap: anywhere;
   }
 
   .listing-title strong {
     flex: 0 0 auto;
     padding: 4px 8px;
     border-radius: 8px;
-    color: #fff;
-    background: #2d5f7a;
+    color: #111315;
+    background: var(--primary);
     font-size: 0.86rem;
+    white-space: nowrap;
   }
 
   .seller-line {
-    display: flex;
     flex-wrap: wrap;
     gap: 8px 14px;
   }
@@ -857,7 +1695,7 @@
   .mod-list {
     display: grid;
     gap: 4px;
-    color: #27342f;
+    color: var(--ink-soft);
     font-size: 0.82rem;
     line-height: 1.35;
   }
@@ -867,7 +1705,7 @@
   }
 
   .pseudo-mods {
-    color: #2d5f7a;
+    color: var(--blue);
     font-weight: 700;
   }
 
@@ -875,29 +1713,81 @@
     display: grid;
     min-height: 90px;
     place-items: center;
-    border: 1px dashed #cad5ce;
+    border: 1px dashed var(--line);
     border-radius: 8px;
+    background: var(--surface-subtle);
   }
 
   .empty-state {
     display: grid;
     min-height: 420px;
     place-items: center;
-    color: #637069;
+    align-content: center;
+    gap: 8px;
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+    color: var(--muted);
+    background: var(--surface-subtle);
+  }
+
+  .empty-state h3 {
+    color: var(--ink);
+    font-size: 1rem;
+  }
+
+  .empty-mark {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    border: 1px solid var(--ink);
+    border-radius: 8px;
+    color: var(--surface);
+    background: var(--ink);
+    font-weight: 800;
   }
 
   @media (max-width: 820px) {
-    .topbar,
     .workspace {
       grid-template-columns: 1fr;
+      width: min(100vw - 20px, 760px);
+      padding-top: 10px;
     }
 
     .topbar {
       align-items: stretch;
+      flex-direction: column;
+      padding: 12px;
+    }
+
+    .topbar-controls {
+      justify-content: stretch;
+    }
+
+    .topnav {
+      justify-content: stretch;
+    }
+
+    .topnav a {
+      flex: 1;
+      justify-content: center;
+    }
+
+    .status-pill,
+    .league-field {
+      flex: 1 1 150px;
+    }
+
+    .capture-panel {
+      position: static;
     }
 
     .item-summary {
       grid-template-columns: repeat(2, minmax(120px, 1fr));
+    }
+
+    .quick-builder {
+      grid-template-columns: 1fr;
     }
 
     .listing-row {
@@ -916,6 +1806,35 @@
 
     .listing-title {
       display: grid;
+    }
+
+    .listing-title strong {
+      width: fit-content;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .item-summary {
+      grid-template-columns: 1fr;
+    }
+
+    .listing-row {
+      grid-template-columns: 1fr;
+    }
+
+    .listing-image {
+      width: 100%;
+      min-height: 92px;
+    }
+
+    .results-heading {
+      align-items: start;
+      flex-direction: column;
+    }
+
+    .results-heading span {
+      max-width: 100%;
+      text-align: left;
     }
   }
 </style>
