@@ -2970,7 +2970,6 @@ Item Level: 2";
                 "quick:gem:skill-20-23-plus-one:filter:gem_level".to_string(),
                 "quick:gem:skill-20-23-plus-one:filter:quality".to_string(),
                 "quick:gem:skill-20-23-plus-one:filter:corrupted".to_string(),
-                "quick:gem:skill-20-23-plus-one:filter:implicit.stat_2251279027".to_string(),
             ],
         )
         .expect("quick gem query should build without pasted item text");
@@ -2981,7 +2980,7 @@ Item Level: 2";
         );
         assert_eq!(
             query["query"]["filters"]["misc_filters"]["filters"]["gem_level"]["min"],
-            20
+            21
         );
         assert_eq!(
             query["query"]["filters"]["misc_filters"]["filters"]["quality"]["min"],
@@ -2991,12 +2990,13 @@ Item Level: 2";
             query["query"]["filters"]["misc_filters"]["filters"]["corrupted"]["option"],
             "true"
         );
-
-        let filters = query["query"]["stats"][0]["filters"]
-            .as_array()
-            .expect("stat filters");
-        assert_eq!(filters[0]["id"], "implicit.stat_2251279027");
-        assert_eq!(filters[0]["value"]["min"], 1);
+        assert_eq!(
+            query["query"]["stats"]
+                .as_array()
+                .expect("stats array")
+                .len(),
+            0
+        );
     }
 
     #[test]
