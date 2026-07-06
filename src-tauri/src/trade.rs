@@ -15,6 +15,7 @@ const FETCH_PAGE_SIZE: usize = 10;
 const QUICK_JEWEL_FILTERS_JSON: &str = include_str!("../../src/lib/quick-jewel-filters.json");
 const QUICK_EQUIPMENT_FILTERS_JSON: &str =
     include_str!("../../src/lib/quick-equipment-filters.json");
+const QUICK_GEM_FILTERS_JSON: &str = include_str!("../../src/lib/quick-gem-filters.json");
 const EXACT_SELECTED_EXPLICIT_AFFIXES_FILTER_ID: &str = "misc:exact_selected_explicit_affixes";
 const EXACT_SELECTED_PREFIX_AFFIXES_FILTER_ID: &str = "misc:exact_selected_prefix_affixes";
 const EXACT_SELECTED_SUFFIX_AFFIXES_FILTER_ID: &str = "misc:exact_selected_suffix_affixes";
@@ -53,6 +54,25 @@ struct QuickEquipmentStat {
     max: Option<f64>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QuickGemFilter {
+    id: String,
+    label: String,
+    category: String,
+    filters: Vec<QuickGemFilterEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct QuickGemFilterEntry {
+    kind: String,
+    id: String,
+    label: String,
+    min: Option<f64>,
+    max: Option<f64>,
+    option: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct TradeFilterSpec {
     pub id: String,
@@ -71,6 +91,7 @@ impl TradeFilterSpec {
     pub fn default_min(&self) -> Option<f64> {
         match &self.kind {
             TradeFilterKind::Stat { value, .. } => *value,
+            TradeFilterKind::Misc { value, .. } => *value,
             TradeFilterKind::Category(_)
             | TradeFilterKind::ItemType { .. }
             | TradeFilterKind::ExactSelectedAffixes { .. } => None,
@@ -80,6 +101,7 @@ impl TradeFilterSpec {
     pub fn default_max(&self) -> Option<f64> {
         match &self.kind {
             TradeFilterKind::Stat { max_value, .. } => *max_value,
+            TradeFilterKind::Misc { max_value, .. } => *max_value,
             TradeFilterKind::Category(_)
             | TradeFilterKind::ItemType { .. }
             | TradeFilterKind::ExactSelectedAffixes { .. } => None,
@@ -105,6 +127,12 @@ enum TradeFilterKind {
         stat_id: String,
         value: Option<f64>,
         max_value: Option<f64>,
+    },
+    Misc {
+        filter_id: String,
+        value: Option<f64>,
+        max_value: Option<f64>,
+        option: Option<String>,
     },
     ExactSelectedAffixes {
         scope: ExactAffixScope,
@@ -374,6 +402,7 @@ pub fn build_trade_query_with_values(
                 stat_filters.push(filter);
             }
             TradeFilterKind::Category(_)
+            | TradeFilterKind::Misc { .. }
             | TradeFilterKind::ItemType { .. }
             | TradeFilterKind::ExactSelectedAffixes { .. } => {}
         }
@@ -505,6 +534,30 @@ pub fn build_trade_query_with_values(
                 query["query"]["filters"]["type_filters"]["filters"]["category"]["option"] =
                     json!(category);
                 query["query"]["filters"]["type_filters"]["disabled"] = json!(false);
+            }
+            TradeFilterKind::Misc {
+                filter_id,
+                value,
+                max_value,
+                option,
+            } => {
+                if let Some(option) = option {
+                    query["query"]["filters"]["misc_filters"]["filters"][filter_id]["option"] =
+                        json!(option);
+                }
+
+                let (min, max) =
+                    filter_value_range(spec.id.as_str(), *value, *max_value, &value_overrides)?;
+                if let Some(min) = min {
+                    query["query"]["filters"]["misc_filters"]["filters"][filter_id]["min"] =
+                        stat_value_json(min);
+                }
+                if let Some(max) = max {
+                    query["query"]["filters"]["misc_filters"]["filters"][filter_id]["max"] =
+                        stat_value_json(max);
+                }
+
+                query["query"]["filters"]["misc_filters"]["disabled"] = json!(false);
             }
             TradeFilterKind::ItemType {
                 type_name,
@@ -1031,7 +1084,9 @@ fn selected_stat_ids(item: &CapturedItem, selected_filter_ids: &[String]) -> Vec
             TradeFilterKind::ExactSelectedAffixes { scope } => {
                 Some(exact_affix_count_stat_id(scope).to_string())
             }
-            TradeFilterKind::Category(_) | TradeFilterKind::ItemType { .. } => None,
+            TradeFilterKind::Category(_)
+            | TradeFilterKind::Misc { .. }
+            | TradeFilterKind::ItemType { .. } => None,
         })
         .collect::<Vec<_>>();
 
@@ -1187,6 +1242,51 @@ fn quick_filter_specs() -> Vec<TradeFilterSpec> {
         }
     }
 
+    for gem in quick_gem_filters() {
+        specs.push(TradeFilterSpec {
+            id: format!("quick:gem:{}:base", gem.id),
+            label: format!("Gem: {}", gem.label),
+            selected_by_default: false,
+            source_modifier_index: None,
+            source: None,
+            affix_side: None,
+            score: None,
+            selection_reason: None,
+            profile_ids: Vec::new(),
+            kind: TradeFilterKind::Category(gem.category.clone()),
+        });
+
+        for filter in &gem.filters {
+            let kind = match filter.kind.as_str() {
+                "stat" => TradeFilterKind::Stat {
+                    stat_id: filter.id.clone(),
+                    value: filter.min,
+                    max_value: filter.max,
+                },
+                "misc" => TradeFilterKind::Misc {
+                    filter_id: filter.id.clone(),
+                    value: filter.min,
+                    max_value: filter.max,
+                    option: filter.option.clone(),
+                },
+                other => panic!("unsupported quick gem filter kind: {other}"),
+            };
+
+            specs.push(TradeFilterSpec {
+                id: format!("quick:gem:{}:filter:{}", gem.id, filter.id),
+                label: format!("{}: {}", gem.label, filter.label),
+                selected_by_default: false,
+                source_modifier_index: None,
+                source: None,
+                affix_side: None,
+                score: None,
+                selection_reason: None,
+                profile_ids: Vec::new(),
+                kind,
+            });
+        }
+    }
+
     specs
 }
 
@@ -1208,6 +1308,17 @@ fn quick_equipment_filters() -> &'static [QuickEquipmentFilter] {
         .get_or_init(|| {
             serde_json::from_str(QUICK_EQUIPMENT_FILTERS_JSON)
                 .expect("quick equipment filter catalog should be valid JSON")
+        })
+        .as_slice()
+}
+
+fn quick_gem_filters() -> &'static [QuickGemFilter] {
+    static FILTERS: OnceLock<Vec<QuickGemFilter>> = OnceLock::new();
+
+    FILTERS
+        .get_or_init(|| {
+            serde_json::from_str(QUICK_GEM_FILTERS_JSON)
+                .expect("quick gem filter catalog should be valid JSON")
         })
         .as_slice()
 }
@@ -2847,6 +2958,45 @@ Item Level: 2";
                 ("explicit.stat_3981240776", 30)
             ]
         );
+    }
+
+    #[test]
+    fn query_builder_accepts_quick_corrupted_gem_filters_without_capture() {
+        let item = empty_item();
+        let query = build_trade_query(
+            &item,
+            &[
+                "quick:gem:skill-20-23-plus-one:base".to_string(),
+                "quick:gem:skill-20-23-plus-one:filter:gem_level".to_string(),
+                "quick:gem:skill-20-23-plus-one:filter:quality".to_string(),
+                "quick:gem:skill-20-23-plus-one:filter:corrupted".to_string(),
+                "quick:gem:skill-20-23-plus-one:filter:implicit.stat_2251279027".to_string(),
+            ],
+        )
+        .expect("quick gem query should build without pasted item text");
+
+        assert_eq!(
+            query["query"]["filters"]["type_filters"]["filters"]["category"]["option"],
+            "gem.activegem"
+        );
+        assert_eq!(
+            query["query"]["filters"]["misc_filters"]["filters"]["gem_level"]["min"],
+            20
+        );
+        assert_eq!(
+            query["query"]["filters"]["misc_filters"]["filters"]["quality"]["min"],
+            23
+        );
+        assert_eq!(
+            query["query"]["filters"]["misc_filters"]["filters"]["corrupted"]["option"],
+            "true"
+        );
+
+        let filters = query["query"]["stats"][0]["filters"]
+            .as_array()
+            .expect("stat filters");
+        assert_eq!(filters[0]["id"], "implicit.stat_2251279027");
+        assert_eq!(filters[0]["value"]["min"], 1);
     }
 
     #[test]

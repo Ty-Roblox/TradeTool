@@ -5,6 +5,7 @@
   import { check } from "@tauri-apps/plugin-updater";
   import { onMount } from "svelte";
   import quickEquipmentFilters from "$lib/quick-equipment-filters.json";
+  import quickGemFilters from "$lib/quick-gem-filters.json";
   import quickJewelFilters from "$lib/quick-jewel-filters.json";
 
   type ItemProperty = {
@@ -181,6 +182,23 @@
     presets?: QuickEquipmentPreset[];
   };
 
+  type QuickGemFilterEntry = {
+    kind: "misc" | "stat";
+    id: string;
+    label: string;
+    min?: number;
+    max?: number;
+    option?: string;
+  };
+
+  type QuickGemFilter = {
+    id: string;
+    label: string;
+    description?: string;
+    category: string;
+    filters: QuickGemFilterEntry[];
+  };
+
   type QuickStatDefaults = {
     min?: number | null;
     max?: number | null;
@@ -188,6 +206,7 @@
 
   const quickJewels = quickJewelFilters as QuickJewelFilter[];
   const quickEquipment = quickEquipmentFilters as QuickEquipmentFilter[];
+  const quickGems = quickGemFilters as QuickGemFilter[];
 
   let league = $state("Runes of Aldur");
   let rawText = $state("");
@@ -197,7 +216,7 @@
   let selectedQuickFilterIds = $state<string[]>([]);
   let filterRanges = $state<Record<string, FilterRange>>({});
   let activePriceProfileId = $state("");
-  let activeFilterTab = $state<"item" | "jewels" | "equipment">("jewels");
+  let activeFilterTab = $state<"item" | "jewels" | "equipment" | "gems">("jewels");
   let activeJewelId = $state(quickJewels[0]?.id ?? "");
   let quickStatId = $state(quickJewels[0]?.stats[0]?.id ?? "");
   let activeEquipmentId = $state(quickEquipment[0]?.id ?? "");
@@ -555,6 +574,14 @@
     return quickEquipment.find((equipment) => equipment.id === activeEquipmentId) ?? quickEquipment[0];
   }
 
+  function quickGemBaseFilterId(gemSearchId: string) {
+    return `quick:gem:${gemSearchId}:base`;
+  }
+
+  function quickGemFilterId(gemSearchId: string, filterId: string) {
+    return `quick:gem:${gemSearchId}:filter:${filterId}`;
+  }
+
   function quickBaseFilterId(jewelId: string) {
     return `quick:jewel:${jewelId}:base`;
   }
@@ -602,6 +629,28 @@
       new Set([...nextFilters, quickEquipmentBaseFilterId(equipmentId)])
     );
     activeFilterTab = "equipment";
+    clearSearchResult();
+  }
+
+  function applyQuickGemSearch(gemSearch: QuickGemFilter) {
+    const gemFilterIds = [
+      quickGemBaseFilterId(gemSearch.id),
+      ...gemSearch.filters.map((filter) => quickGemFilterId(gemSearch.id, filter.id))
+    ];
+    const removedIds = selectedQuickFilterIds.filter((id) => !gemFilterIds.includes(id));
+
+    selectedFilterIds = [];
+    activePriceProfileId = "";
+    selectedQuickFilterIds = gemFilterIds;
+    removeFilterRanges(removedIds);
+
+    for (const filter of gemSearch.filters) {
+      if (filter.min != null || filter.max != null) {
+        ensureFilterRange(quickGemFilterId(gemSearch.id, filter.id), filter.min, filter.max);
+      }
+    }
+
+    activeFilterTab = "gems";
     clearSearchResult();
   }
 
@@ -702,6 +751,22 @@
     const quickType = parts[1];
     const presetId = parts[2];
 
+    if (quickType === "gem") {
+      const gemSearch = quickGems.find((candidate) => candidate.id === presetId);
+
+      if (!gemSearch) {
+        return id;
+      }
+
+      if (parts[3] === "base") {
+        return `${gemSearch.label} category`;
+      }
+
+      const filterId = parts.slice(4).join(":");
+      const filter = gemSearch.filters.find((candidate) => candidate.id === filterId);
+      return filter ? `${gemSearch.label}: ${filter.label}` : id;
+    }
+
     if (quickType === "equipment") {
       const equipment = quickEquipment.find((candidate) => candidate.id === presetId);
 
@@ -750,6 +815,13 @@
     return [
       quickEquipmentBaseFilterId(equipment.id),
       ...preset.stats.map((statId) => quickEquipmentStatFilterId(equipment.id, statId))
+    ].every((id) => selectedQuickFilterIds.includes(id));
+  }
+
+  function isQuickGemSearchSelected(gemSearch: QuickGemFilter) {
+    return [
+      quickGemBaseFilterId(gemSearch.id),
+      ...gemSearch.filters.map((filter) => quickGemFilterId(gemSearch.id, filter.id))
     ].every((id) => selectedQuickFilterIds.includes(id));
   }
 
@@ -1079,6 +1151,15 @@
           Quick Jewels
         </button>
         <button
+          class:active-tab={activeFilterTab === "gems"}
+          type="button"
+          role="tab"
+          aria-selected={activeFilterTab === "gems"}
+          onclick={() => (activeFilterTab = "gems")}
+        >
+          Quick Gems
+        </button>
+        <button
           class:active-tab={activeFilterTab === "equipment"}
           type="button"
           role="tab"
@@ -1099,7 +1180,67 @@
         </button>
       </div>
 
-      {#if activeFilterTab === "jewels"}
+      {#if activeFilterTab === "gems"}
+        <section class="quick-filter-panel">
+          <div class="quick-filter-heading">
+            <div>
+              <span class="eyebrow">Quick filter</span>
+              <h3>Corrupted Gem Scanner</h3>
+            </div>
+            <span>{quickGems.length} searches</span>
+          </div>
+
+          <div class="quick-preset-grid" aria-label="Gem search presets">
+            {#each quickGems as gemSearch}
+              <button
+                class:quick-preset-active={isQuickGemSearchSelected(gemSearch)}
+                type="button"
+                onclick={() => applyQuickGemSearch(gemSearch)}
+                disabled={searching}
+              >
+                <strong>{gemSearch.label}</strong>
+                <span>{gemSearch.description ?? "Apply this gem search preset."}</span>
+                <em>{gemSearch.filters.length} filters</em>
+              </button>
+            {/each}
+          </div>
+
+          {#if selectedQuickFilterIds.length}
+            <div class="quick-chip-list" aria-label="Selected quick filters">
+              {#each selectedQuickFilterIds as id}
+                <div class="quick-chip">
+                  <span>{quickFilterLabel(id)}</span>
+                  {#if filterRanges[id]}
+                    <div class="range-controls compact-range" aria-label={`${quickFilterLabel(id)} range`}>
+                      <label>
+                        <span>Min</span>
+                        <input
+                          type="number"
+                          inputmode="decimal"
+                          value={filterRanges[id].min}
+                          oninput={(event) =>
+                            updateFilterRange(id, "min", (event.currentTarget as HTMLInputElement).value)}
+                        />
+                      </label>
+                      <label>
+                        <span>Max</span>
+                        <input
+                          type="number"
+                          inputmode="decimal"
+                          value={filterRanges[id].max}
+                          oninput={(event) =>
+                            updateFilterRange(id, "max", (event.currentTarget as HTMLInputElement).value)}
+                        />
+                      </label>
+                    </div>
+                  {/if}
+                  <button type="button" onclick={() => removeQuickFilter(id)}>Remove</button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </section>
+      {:else if activeFilterTab === "jewels"}
         <section class="quick-filter-panel">
           <div class="quick-filter-heading">
             <div>

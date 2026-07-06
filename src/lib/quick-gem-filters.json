@@ -1,0 +1,92 @@
+[
+  {
+    "id": "skill-20-23-plus-one",
+    "label": "20/23 +1 Skill Gems",
+    "description": "Level 20, 23% quality, corrupted skill gems with +1 to all corrupted skill gems.",
+    "category": "gem.activegem",
+    "filters": [
+      { "kind": "misc", "id": "gem_level", "label": "Gem Level", "min": 20 },
+      { "kind": "misc", "id": "quality", "label": "Quality", "min": 23 },
+      { "kind": "misc", "id": "corrupted", "label": "Corrupted", "option": "true" },
+      {
+        "kind": "stat",
+        "id": "implicit.stat_2251279027",
+        "label": "+# to Level of all Corrupted Skill Gems",
+        "min": 1
+      }
+    ]
+  },
+  {
+    "id": "spirit-20-23-plus-one",
+    "label": "20/23 +1 Spirit Gems",
+    "description": "Meta/spirit-style gems with 20/23 corrupted +1 gem level filtering.",
+    "category": "gem.metagem",
+    "filters": [
+      { "kind": "misc", "id": "gem_level", "label": "Gem Level", "min": 20 },
+      { "kind": "misc", "id": "quality", "label": "Quality", "min": 23 },
+      { "kind": "misc", "id": "corrupted", "label": "Corrupted", "option": "true" },
+      {
+        "kind": "stat",
+        "id": "implicit.stat_2251279027",
+        "label": "+# to Level of all Corrupted Skill Gems",
+        "min": 1
+      }
+    ]
+  },
+  {
+    "id": "skill-20-23",
+    "label": "20/23 Skill Gems",
+    "description": "Level 20, 23% quality corrupted skill gems without requiring +1.",
+    "category": "gem.activegem",
+    "filters": [
+      { "kind": "misc", "id": "gem_level", "label": "Gem Level", "min": 20 },
+      { "kind": "misc", "id": "quality", "label": "Quality", "min": 23 },
+      { "kind": "misc", "id": "corrupted", "label": "Corrupted", "option": "true" }
+    ]
+  },
+  {
+    "id": "spirit-20-23",
+    "label": "20/23 Spirit Gems",
+    "description": "Meta/spirit-style gems at level 20 and 23% quality.",
+    "category": "gem.metagem",
+    "filters": [
+      { "kind": "misc", "id": "gem_level", "label": "Gem Level", "min": 20 },
+      { "kind": "misc", "id": "quality", "label": "Quality", "min": 23 },
+      { "kind": "misc", "id": "corrupted", "label": "Corrupted", "option": "true" }
+    ]
+  },
+  {
+    "id": "support-20-23-plus-one",
+    "label": "20/23 +1 Support Gems",
+    "description": "Support gems matching the same corrupted 20/23 +1 pattern.",
+    "category": "gem.supportgem",
+    "filters": [
+      { "kind": "misc", "id": "gem_level", "label": "Gem Level", "min": 20 },
+      { "kind": "misc", "id": "quality", "label": "Quality", "min": 23 },
+      { "kind": "misc", "id": "corrupted", "label": "Corrupted", "option": "true" },
+      {
+        "kind": "stat",
+        "id": "implicit.stat_2251279027",
+        "label": "+# to Level of all Corrupted Skill Gems",
+        "min": 1
+      }
+    ]
+  },
+  {
+    "id": "meta-20-20-plus-one",
+    "label": "20/20 +1 Meta Gems",
+    "description": "Looser meta-gem scan for corrupted +1 gems before filtering upward.",
+    "category": "gem.metagem",
+    "filters": [
+      { "kind": "misc", "id": "gem_level", "label": "Gem Level", "min": 20 },
+      { "kind": "misc", "id": "quality", "label": "Quality", "min": 20 },
+      { "kind": "misc", "id": "corrupted", "label": "Corrupted", "option": "true" },
+      {
+        "kind": "stat",
+        "id": "implicit.stat_2251279027",
+        "label": "+# to Level of all Corrupted Skill Gems",
+        "min": 1
+      }
+    ]
+  }
+]
