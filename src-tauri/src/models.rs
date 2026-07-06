@@ -174,4 +174,16 @@ pub struct TradeListingItem {
     pub item_level: Option<u32>,
     pub explicit_mods: Vec<String>,
     pub pseudo_mods: Vec<String>,
+    #[serde(default)]
+    pub explicit_mod_segments: Vec<Vec<TradeTextSegment>>,
+    #[serde(default)]
+    pub pseudo_mod_segments: Vec<Vec<TradeTextSegment>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TradeTextSegment {
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
 }

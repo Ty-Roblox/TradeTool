@@ -132,6 +132,13 @@
     itemLevel?: number;
     explicitMods: string[];
     pseudoMods: string[];
+    explicitModSegments?: RichTextSegment[][];
+    pseudoModSegments?: RichTextSegment[][];
+  };
+
+  type RichTextSegment = {
+    text: string;
+    tag?: string;
   };
 
   type QuickJewelStat = {
@@ -725,6 +732,25 @@
     return parts.join(" / ");
   }
 
+  function modLines(segments: RichTextSegment[][] | undefined, fallback: string[]): RichTextSegment[][] {
+    if (segments?.length) {
+      return segments;
+    }
+
+    return fallback.map((text): RichTextSegment[] => [{ text }]);
+  }
+
+  function poeTagClass(tag?: string) {
+    if (!tag) {
+      return "";
+    }
+
+    return `poe-tag-${tag
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")}`;
+  }
+
   function formatFilterTag(value?: string) {
     if (!value) {
       return "";
@@ -1219,16 +1245,40 @@
 
                     {#if listing.item.pseudoMods.length}
                       <div class="mod-list pseudo-mods">
-                        {#each listing.item.pseudoMods as mod}
-                          <span>{mod}</span>
+                        {#each modLines(listing.item.pseudoModSegments, listing.item.pseudoMods) as line}
+                          <span class="mod-line">
+                            {#each line as segment}
+                              {#if segment.tag}
+                                <span
+                                  class={`poe-token ${poeTagClass(segment.tag)}`}
+                                  title={formatFilterTag(segment.tag)}
+                                  >{segment.text}</span
+                                >
+                              {:else}
+                                {segment.text}
+                              {/if}
+                            {/each}
+                          </span>
                         {/each}
                       </div>
                     {/if}
 
                     {#if listing.item.explicitMods.length}
                       <div class="mod-list">
-                        {#each listing.item.explicitMods as mod}
-                          <span>{mod}</span>
+                        {#each modLines(listing.item.explicitModSegments, listing.item.explicitMods) as line}
+                          <span class="mod-line">
+                            {#each line as segment}
+                              {#if segment.tag}
+                                <span
+                                  class={`poe-token ${poeTagClass(segment.tag)}`}
+                                  title={formatFilterTag(segment.tag)}
+                                  >{segment.text}</span
+                                >
+                              {:else}
+                                {segment.text}
+                              {/if}
+                            {/each}
+                          </span>
                         {/each}
                       </div>
                     {/if}
@@ -2377,8 +2427,41 @@
     line-height: 1.35;
   }
 
-  .mod-list span {
+  .mod-line {
     overflow-wrap: anywhere;
+  }
+
+  .poe-token {
+    color: var(--gold);
+    font-weight: 800;
+  }
+
+  .poe-tag-energyshield {
+    color: #66d9ef;
+  }
+
+  .poe-tag-minion {
+    color: #c6a7ff;
+  }
+
+  .poe-tag-fire {
+    color: #ff9a62;
+  }
+
+  .poe-tag-cold {
+    color: #7fc7ff;
+  }
+
+  .poe-tag-lightning {
+    color: #f7d774;
+  }
+
+  .poe-tag-chaos {
+    color: #d0a6ff;
+  }
+
+  .poe-tag-life {
+    color: #ff8d8d;
   }
 
   .pseudo-mods {

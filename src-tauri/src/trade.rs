@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 use crate::models::{
     AppDiagnostic, CapturedItem, FilterValueOverride, ItemModifier, TradeListing, TradeListingItem,
-    TradePrice, TradeSearchResponse,
+    TradePrice, TradeSearchResponse, TradeTextSegment,
 };
 use crate::stat_patterns::STAT_PATTERNS;
 use serde::Deserialize;
@@ -791,6 +791,15 @@ pub fn map_fetch_response(response_body: &str) -> Result<Vec<TradeListing>, Stri
             let is_exact_buyout = price.as_ref().is_some_and(is_exact_buyout_price);
             let hideout_token = is_exact_buyout.then_some(hideout_token).flatten();
 
+            let explicit_mods_raw = result
+                .item
+                .explicit_mods
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(FetchMod::into_text)
+                .collect::<Vec<_>>();
+            let pseudo_mods_raw = result.item.pseudo_mods.unwrap_or_default();
+
             TradeListing {
                 id: result.id,
                 indexed: result.listing.indexed,
@@ -805,14 +814,22 @@ pub fn map_fetch_response(response_body: &str) -> Result<Vec<TradeListing>, Stri
                     base_type: result.item.base_type,
                     rarity: result.item.rarity,
                     item_level: result.item.item_level,
-                    explicit_mods: result
-                        .item
-                        .explicit_mods
-                        .unwrap_or_default()
-                        .into_iter()
-                        .filter_map(FetchMod::into_text)
+                    explicit_mods: explicit_mods_raw
+                        .iter()
+                        .map(|modifier| expand_trade_text_tags(modifier))
                         .collect(),
-                    pseudo_mods: result.item.pseudo_mods.unwrap_or_default(),
+                    pseudo_mods: pseudo_mods_raw
+                        .iter()
+                        .map(|modifier| expand_trade_text_tags(modifier))
+                        .collect(),
+                    explicit_mod_segments: explicit_mods_raw
+                        .iter()
+                        .map(|modifier| trade_text_segments(modifier))
+                        .collect(),
+                    pseudo_mod_segments: pseudo_mods_raw
+                        .iter()
+                        .map(|modifier| trade_text_segments(modifier))
+                        .collect(),
                 },
             }
         })
@@ -1699,6 +1716,62 @@ fn expand_trade_text_tags(text: &str) -> String {
     result
 }
 
+fn trade_text_segments(text: &str) -> Vec<TradeTextSegment> {
+    let mut segments = Vec::new();
+    let mut plain = String::new();
+    let mut chars = text.chars();
+
+    while let Some(ch) = chars.next() {
+        if ch != '[' {
+            plain.push(ch);
+            continue;
+        }
+
+        let mut tag = String::new();
+        let mut closed = false;
+
+        for tag_ch in chars.by_ref() {
+            if tag_ch == ']' {
+                closed = true;
+                break;
+            }
+            tag.push(tag_ch);
+        }
+
+        if !closed {
+            plain.push('[');
+            plain.push_str(&tag);
+            continue;
+        }
+
+        if !plain.is_empty() {
+            segments.push(TradeTextSegment {
+                text: std::mem::take(&mut plain),
+                tag: None,
+            });
+        }
+
+        let (tag_name, display) = tag
+            .split_once('|')
+            .map_or((tag.as_str(), tag.as_str()), |(tag_name, display)| {
+                (tag_name, display)
+            });
+        segments.push(TradeTextSegment {
+            text: display.to_string(),
+            tag: Some(tag_name.to_string()),
+        });
+    }
+
+    if !plain.is_empty() {
+        segments.push(TradeTextSegment {
+            text: plain,
+            tag: None,
+        });
+    }
+
+    segments
+}
+
 fn preferred_stat_sources(text: &str) -> Vec<&'static str> {
     let lower = text.to_lowercase();
 
@@ -1996,6 +2069,7 @@ impl FetchMod {
 mod tests {
     use crate::models::{
         CapturedItem, FilterValueOverride, TradeListing, TradeListingItem, TradePrice,
+        TradeTextSegment,
     };
     use crate::parser::parse_item_text;
     use crate::trade::{
@@ -2167,6 +2241,8 @@ Item Level: 2";
                     .map(|modifier| modifier.to_string())
                     .collect(),
                 pseudo_mods: Vec::new(),
+                explicit_mod_segments: Vec::new(),
+                pseudo_mod_segments: Vec::new(),
             },
         }
     }
@@ -2753,6 +2829,26 @@ Item Level: 2";
         assert_eq!(listings[0].item.name.as_deref(), Some("Cataclysm Road"));
         assert_eq!(listings[0].item.item_level, Some(82));
         assert_eq!(listings[0].item.explicit_mods.len(), 2);
+        assert_eq!(
+            listings[0].item.explicit_mods,
+            vec![
+                "124% increased Energy Shield".to_string(),
+                "+371 to Stun Threshold".to_string()
+            ]
+        );
+        assert_eq!(
+            listings[0].item.explicit_mod_segments[0],
+            vec![
+                TradeTextSegment {
+                    text: "124% increased ".to_string(),
+                    tag: None,
+                },
+                TradeTextSegment {
+                    text: "Energy Shield".to_string(),
+                    tag: Some("EnergyShield".to_string()),
+                },
+            ]
+        );
         assert_eq!(
             listings[0].item.pseudo_mods,
             vec!["+45% total Elemental Resistance"]

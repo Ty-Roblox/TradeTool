@@ -660,6 +660,8 @@ mod tests {
                 item_level: None,
                 explicit_mods: Vec::new(),
                 pseudo_mods: Vec::new(),
+                explicit_mod_segments: Vec::new(),
+                pseudo_mod_segments: Vec::new(),
             },
         }
     }
