@@ -2810,6 +2810,46 @@ Item Level: 2";
     }
 
     #[test]
+    fn query_builder_accepts_expanded_quick_equipment_categories() {
+        let item = empty_item();
+        let query = build_trade_query(
+            &item,
+            &[
+                "quick:equipment:sceptre:base".to_string(),
+                "quick:equipment:sceptre:stat:explicit.stat_2162097452".to_string(),
+                "quick:equipment:sceptre:stat:explicit.stat_3981240776".to_string(),
+            ],
+        )
+        .expect("expanded quick equipment query should build");
+
+        assert_eq!(
+            query["query"]["filters"]["type_filters"]["filters"]["category"]["option"],
+            "weapon.sceptre"
+        );
+
+        let filters = query["query"]["stats"][0]["filters"]
+            .as_array()
+            .expect("stat filters");
+        let observed = filters
+            .iter()
+            .map(|filter| {
+                (
+                    filter["id"].as_str().expect("id"),
+                    filter["value"]["min"].as_i64().expect("min"),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            observed,
+            vec![
+                ("explicit.stat_2162097452", 2),
+                ("explicit.stat_3981240776", 30)
+            ]
+        );
+    }
+
+    #[test]
     fn query_builder_maps_sockets_and_reduced_poison_duration() {
         let item = parse_item_text(RARE_WITH_SOCKETS_AND_REDUCED_POISON_DURATION)
             .expect("item should parse");

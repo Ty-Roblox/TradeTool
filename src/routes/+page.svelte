@@ -166,11 +166,19 @@
     max?: number;
   };
 
+  type QuickEquipmentPreset = {
+    id: string;
+    label: string;
+    description?: string;
+    stats: string[];
+  };
+
   type QuickEquipmentFilter = {
     id: string;
     label: string;
     category: string;
     stats: QuickEquipmentStat[];
+    presets?: QuickEquipmentPreset[];
   };
 
   type QuickStatDefaults = {
@@ -637,6 +645,38 @@
     clearSearchResult();
   }
 
+  function applyQuickEquipmentPreset(preset: QuickEquipmentPreset) {
+    const equipment = activeEquipment();
+    if (!equipment) {
+      return;
+    }
+
+    const validStats = preset.stats.filter((statId) =>
+      equipment.stats.some((candidate) => candidate.id === statId)
+    );
+    const presetFilterIds = [
+      quickEquipmentBaseFilterId(equipment.id),
+      ...validStats.map((statId) => quickEquipmentStatFilterId(equipment.id, statId))
+    ];
+    const removedIds = selectedQuickFilterIds.filter((id) => id.startsWith("quick:equipment:"));
+
+    selectedQuickFilterIds = Array.from(
+      new Set([
+        ...selectedQuickFilterIds.filter((id) => !id.startsWith("quick:equipment:")),
+        ...presetFilterIds
+      ])
+    );
+    removeFilterRanges(removedIds.filter((id) => !presetFilterIds.includes(id)));
+
+    for (const statId of validStats) {
+      const defaults = quickEquipmentStatDefaults(equipment.id, statId);
+      ensureFilterRange(quickEquipmentStatFilterId(equipment.id, statId), defaults.min, defaults.max);
+    }
+
+    activeFilterTab = "equipment";
+    clearSearchResult();
+  }
+
   function removeQuickFilter(id: string) {
     const parts = id.split(":");
     const quickType = parts[1];
@@ -699,6 +739,18 @@
 
   function isQuickEquipmentBaseSelected(equipmentId: string) {
     return selectedQuickFilterIds.includes(quickEquipmentBaseFilterId(equipmentId));
+  }
+
+  function isQuickEquipmentPresetSelected(preset: QuickEquipmentPreset) {
+    const equipment = activeEquipment();
+    if (!equipment) {
+      return false;
+    }
+
+    return [
+      quickEquipmentBaseFilterId(equipment.id),
+      ...preset.stats.map((statId) => quickEquipmentStatFilterId(equipment.id, statId))
+    ].every((id) => selectedQuickFilterIds.includes(id));
   }
 
   function clearSearchResult() {
@@ -1152,6 +1204,23 @@
               </button>
             {/each}
           </div>
+
+          {#if activeEquipment()?.presets?.length}
+            <div class="quick-preset-grid" aria-label={`${activeEquipment()?.label ?? "Equipment"} presets`}>
+              {#each activeEquipment()?.presets ?? [] as preset}
+                <button
+                  class:quick-preset-active={isQuickEquipmentPresetSelected(preset)}
+                  type="button"
+                  onclick={() => applyQuickEquipmentPreset(preset)}
+                  disabled={searching}
+                >
+                  <strong>{preset.label}</strong>
+                  <span>{preset.description ?? "Apply this equipment search preset."}</span>
+                  <em>{preset.stats.length} stats</em>
+                </button>
+              {/each}
+            </div>
+          {/if}
 
           <div class="quick-builder">
             <label>
@@ -2091,6 +2160,59 @@
     color: var(--muted);
     font-size: 0.78rem;
     font-weight: 700;
+  }
+
+  .quick-preset-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px;
+  }
+
+  .quick-preset-grid button {
+    display: grid;
+    min-height: 96px;
+    align-content: space-between;
+    gap: 7px;
+    padding: 12px;
+    border-color: rgba(45, 159, 137, 0.34);
+    color: var(--ink);
+    background:
+      linear-gradient(135deg, rgba(45, 159, 137, 0.12), rgba(214, 179, 106, 0.08)),
+      var(--surface);
+    text-align: left;
+  }
+
+  .quick-preset-grid button:hover,
+  .quick-preset-grid button.quick-preset-active {
+    border-color: var(--primary);
+    background:
+      linear-gradient(135deg, rgba(214, 179, 106, 0.16), rgba(45, 159, 137, 0.14)),
+      var(--surface);
+  }
+
+  .quick-preset-grid strong {
+    color: var(--ink);
+    overflow-wrap: anywhere;
+  }
+
+  .quick-preset-grid span {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  .quick-preset-grid em {
+    width: fit-content;
+    min-height: 24px;
+    padding: 4px 7px;
+    border: 1px solid rgba(214, 179, 106, 0.3);
+    border-radius: 8px;
+    color: #f2d89a;
+    background: rgba(214, 179, 106, 0.12);
+    font-size: 0.72rem;
+    font-style: normal;
+    font-weight: 900;
   }
 
   .quick-builder {

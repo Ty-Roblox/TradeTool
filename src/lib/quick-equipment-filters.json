@@ -5,11 +5,43 @@
     "category": "armour.boots",
     "stats": [
       { "id": "explicit.stat_2250533757", "label": "#% increased Movement Speed", "min": 25 },
+      { "id": "pseudo.pseudo_increased_movement_speed", "label": "#% total increased Movement Speed", "min": 25 },
       { "id": "pseudo.pseudo_total_life", "label": "+# total maximum Life", "min": 80 },
       { "id": "pseudo.pseudo_total_energy_shield", "label": "+# total maximum Energy Shield", "min": 80 },
       { "id": "pseudo.pseudo_total_elemental_resistance", "label": "+#% total Elemental Resistance", "min": 60 },
       { "id": "pseudo.pseudo_total_chaos_resistance", "label": "+#% total to Chaos Resistance", "min": 25 },
       { "id": "explicit.stat_3917489142", "label": "#% increased Rarity of Items found", "min": 20 }
+    ],
+    "presets": [
+      {
+        "id": "speed-life-res",
+        "label": "Speed Life Res",
+        "description": "Fast rare boots with core survivability.",
+        "stats": [
+          "explicit.stat_2250533757",
+          "pseudo.pseudo_total_life",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      },
+      {
+        "id": "speed-es-res",
+        "label": "Speed ES Res",
+        "description": "Energy Shield boots for caster or hybrid setups.",
+        "stats": [
+          "explicit.stat_2250533757",
+          "pseudo.pseudo_total_energy_shield",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      },
+      {
+        "id": "mf-boots",
+        "label": "MF Boots",
+        "description": "Movement speed plus rarity for mapping gear.",
+        "stats": [
+          "explicit.stat_2250533757",
+          "explicit.stat_3917489142"
+        ]
+      }
     ]
   },
   {
@@ -23,7 +55,39 @@
       { "id": "pseudo.pseudo_total_elemental_resistance", "label": "+#% total Elemental Resistance", "min": 60 },
       { "id": "pseudo.pseudo_total_chaos_resistance", "label": "+#% total to Chaos Resistance", "min": 25 },
       { "id": "explicit.stat_3981240776", "label": "# to Spirit", "min": 30 },
+      { "id": "explicit.stat_1379411836", "label": "# to all Attributes", "min": 20 },
       { "id": "explicit.stat_3917489142", "label": "#% increased Rarity of Items found", "min": 20 }
+    ],
+    "presets": [
+      {
+        "id": "life-res",
+        "label": "Life Res",
+        "description": "Generic rare helmet for life builds.",
+        "stats": [
+          "pseudo.pseudo_total_life",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      },
+      {
+        "id": "es-spirit",
+        "label": "ES Spirit",
+        "description": "Caster helmet with Energy Shield and Spirit.",
+        "stats": [
+          "pseudo.pseudo_total_energy_shield",
+          "pseudo.pseudo_increased_energy_shield",
+          "explicit.stat_3981240776"
+        ]
+      },
+      {
+        "id": "mf-helmet",
+        "label": "MF Helmet",
+        "description": "Rarity helmet with useful defenses.",
+        "stats": [
+          "explicit.stat_3917489142",
+          "pseudo.pseudo_total_life",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      }
     ]
   },
   {
@@ -35,8 +99,41 @@
       { "id": "pseudo.pseudo_total_energy_shield", "label": "+# total maximum Energy Shield", "min": 150 },
       { "id": "pseudo.pseudo_increased_energy_shield", "label": "#% total increased maximum Energy Shield", "min": 60 },
       { "id": "explicit.stat_3523867985", "label": "#% increased Armour, Evasion and Energy Shield", "min": 80 },
+      { "id": "explicit.stat_1177404658", "label": "#% increased Global Armour, Evasion and Energy Shield", "min": 60 },
+      { "id": "explicit.stat_2866361420", "label": "#% increased Armour", "min": 80 },
+      { "id": "explicit.stat_2106365538", "label": "#% increased Evasion Rating", "min": 80 },
       { "id": "pseudo.pseudo_total_elemental_resistance", "label": "+#% total Elemental Resistance", "min": 60 },
       { "id": "pseudo.pseudo_total_chaos_resistance", "label": "+#% total to Chaos Resistance", "min": 25 }
+    ],
+    "presets": [
+      {
+        "id": "life-res",
+        "label": "Life Res",
+        "description": "High-life chest with resistance pressure covered.",
+        "stats": [
+          "pseudo.pseudo_total_life",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      },
+      {
+        "id": "high-es",
+        "label": "High ES",
+        "description": "Energy Shield chest with flat and increased ES.",
+        "stats": [
+          "pseudo.pseudo_total_energy_shield",
+          "pseudo.pseudo_increased_energy_shield"
+        ]
+      },
+      {
+        "id": "hybrid-defence",
+        "label": "Hybrid Defence",
+        "description": "Global armour/evasion/ES scaling plus defenses.",
+        "stats": [
+          "explicit.stat_3523867985",
+          "pseudo.pseudo_total_life",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      }
     ]
   },
   {
@@ -49,8 +146,42 @@
       { "id": "pseudo.pseudo_total_elemental_resistance", "label": "+#% total Elemental Resistance", "min": 60 },
       { "id": "pseudo.pseudo_total_chaos_resistance", "label": "+#% total to Chaos Resistance", "min": 25 },
       { "id": "explicit.stat_681332047", "label": "#% increased Attack Speed", "min": 10 },
+      { "id": "explicit.stat_2672805335", "label": "#% increased Attack and Cast Speed", "min": 8 },
       { "id": "explicit.stat_624954515", "label": "#% increased Accuracy Rating", "min": 80 },
+      { "id": "explicit.stat_1379411836", "label": "# to all Attributes", "min": 20 },
       { "id": "explicit.stat_3917489142", "label": "#% increased Rarity of Items found", "min": 20 }
+    ],
+    "presets": [
+      {
+        "id": "attack-life-res",
+        "label": "Attack Life Res",
+        "description": "Attack-speed gloves with life and resists.",
+        "stats": [
+          "explicit.stat_681332047",
+          "pseudo.pseudo_total_life",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      },
+      {
+        "id": "accuracy-attack",
+        "label": "Accuracy Attack",
+        "description": "Attack gloves for hit builds that need accuracy.",
+        "stats": [
+          "explicit.stat_681332047",
+          "explicit.stat_624954515",
+          "pseudo.pseudo_total_life"
+        ]
+      },
+      {
+        "id": "mf-gloves",
+        "label": "MF Gloves",
+        "description": "Rarity gloves with useful baseline defense.",
+        "stats": [
+          "explicit.stat_3917489142",
+          "pseudo.pseudo_total_life",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      }
     ]
   },
   {
@@ -63,7 +194,54 @@
       { "id": "explicit.stat_4147897060", "label": "#% increased Block chance", "min": 20 },
       { "id": "explicit.stat_1702195217", "label": "#% to Block chance", "min": 20 },
       { "id": "explicit.stat_2523933828", "label": "#% increased Armour, Evasion and Energy Shield from Equipped Shield", "min": 80 },
-      { "id": "pseudo.pseudo_total_elemental_resistance", "label": "+#% total Elemental Resistance", "min": 60 }
+      { "id": "pseudo.pseudo_total_elemental_resistance", "label": "+#% total Elemental Resistance", "min": 60 },
+      { "id": "pseudo.pseudo_total_chaos_resistance", "label": "+#% total to Chaos Resistance", "min": 25 }
+    ],
+    "presets": [
+      {
+        "id": "block-life",
+        "label": "Block Life",
+        "description": "Life shield with block and elemental resistance.",
+        "stats": [
+          "explicit.stat_1702195217",
+          "pseudo.pseudo_total_life",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      },
+      {
+        "id": "block-es",
+        "label": "Block ES",
+        "description": "Energy Shield shield with block scaling.",
+        "stats": [
+          "explicit.stat_1702195217",
+          "pseudo.pseudo_total_energy_shield",
+          "explicit.stat_2523933828"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "buckler",
+    "label": "Buckler",
+    "category": "armour.buckler",
+    "stats": [
+      { "id": "explicit.stat_1702195217", "label": "#% to Block chance", "min": 18 },
+      { "id": "explicit.stat_2106365538", "label": "#% increased Evasion Rating", "min": 80 },
+      { "id": "pseudo.pseudo_total_life", "label": "+# total maximum Life", "min": 70 },
+      { "id": "pseudo.pseudo_total_elemental_resistance", "label": "+#% total Elemental Resistance", "min": 50 },
+      { "id": "explicit.stat_681332047", "label": "#% increased Attack Speed", "min": 10 }
+    ],
+    "presets": [
+      {
+        "id": "evasion-block",
+        "label": "Evasion Block",
+        "description": "Buckler defense with life and block.",
+        "stats": [
+          "explicit.stat_1702195217",
+          "explicit.stat_2106365538",
+          "pseudo.pseudo_total_life"
+        ]
+      }
     ]
   },
   {
@@ -72,11 +250,48 @@
     "category": "armour.focus",
     "stats": [
       { "id": "pseudo.pseudo_total_energy_shield", "label": "+# total maximum Energy Shield", "min": 100 },
+      { "id": "pseudo.pseudo_increased_energy_shield", "label": "#% total increased maximum Energy Shield", "min": 50 },
       { "id": "explicit.stat_3174700878", "label": "#% increased Energy Shield from Equipped Focus", "min": 40 },
       { "id": "explicit.stat_2974417149", "label": "#% increased Spell Damage", "min": 50 },
       { "id": "explicit.stat_2891184298", "label": "#% increased Cast Speed", "min": 10 },
       { "id": "explicit.stat_124131830", "label": "# to Level of all Spell Skills", "min": 2 },
+      { "id": "explicit.stat_1545858329", "label": "# to Level of all Lightning Spell Skills", "min": 2 },
+      { "id": "explicit.stat_591105508", "label": "# to Level of all Fire Spell Skills", "min": 2 },
+      { "id": "explicit.stat_2254480358", "label": "# to Level of all Cold Spell Skills", "min": 2 },
+      { "id": "explicit.stat_4226189338", "label": "# to Level of all Chaos Spell Skills", "min": 2 },
       { "id": "explicit.stat_3981240776", "label": "# to Spirit", "min": 30 }
+    ],
+    "presets": [
+      {
+        "id": "spell-levels",
+        "label": "Spell Levels",
+        "description": "Focus for gem-level scaling casters.",
+        "stats": [
+          "explicit.stat_124131830",
+          "explicit.stat_2891184298",
+          "pseudo.pseudo_total_energy_shield"
+        ]
+      },
+      {
+        "id": "spell-damage-cast",
+        "label": "Spell Cast",
+        "description": "Generic damage and speed focus.",
+        "stats": [
+          "explicit.stat_2974417149",
+          "explicit.stat_2891184298",
+          "pseudo.pseudo_total_energy_shield"
+        ]
+      },
+      {
+        "id": "spirit-es",
+        "label": "Spirit ES",
+        "description": "Spirit plus Energy Shield for reservation setups.",
+        "stats": [
+          "explicit.stat_3981240776",
+          "pseudo.pseudo_total_energy_shield",
+          "pseudo.pseudo_increased_energy_shield"
+        ]
+      }
     ]
   },
   {
@@ -88,8 +303,32 @@
       { "id": "explicit.stat_1202301673", "label": "# to Level of all Projectile Skills", "min": 2 },
       { "id": "explicit.stat_681332047", "label": "#% increased Attack Speed", "min": 10 },
       { "id": "explicit.stat_587431675", "label": "#% increased Critical Hit Chance", "min": 20 },
+      { "id": "explicit.stat_3556824919", "label": "#% increased Critical Damage Bonus", "min": 20 },
+      { "id": "explicit.stat_624954515", "label": "#% increased Accuracy Rating", "min": 80 },
       { "id": "pseudo.pseudo_total_life", "label": "+# total maximum Life", "min": 70 },
       { "id": "pseudo.pseudo_total_elemental_resistance", "label": "+#% total Elemental Resistance", "min": 50 }
+    ],
+    "presets": [
+      {
+        "id": "projectile-levels",
+        "label": "Projectile Levels",
+        "description": "Quiver for projectile gem scaling.",
+        "stats": [
+          "explicit.stat_1202301673",
+          "explicit.stat_1839076647",
+          "pseudo.pseudo_total_life"
+        ]
+      },
+      {
+        "id": "crit-projectile",
+        "label": "Crit Projectile",
+        "description": "Projectile quiver with crit pressure.",
+        "stats": [
+          "explicit.stat_1839076647",
+          "explicit.stat_587431675",
+          "explicit.stat_3556824919"
+        ]
+      }
     ]
   },
   {
@@ -101,9 +340,54 @@
       { "id": "pseudo.pseudo_total_mana", "label": "+# total maximum Mana", "min": 60 },
       { "id": "pseudo.pseudo_total_elemental_resistance", "label": "+#% total Elemental Resistance", "min": 70 },
       { "id": "pseudo.pseudo_total_chaos_resistance", "label": "+#% total to Chaos Resistance", "min": 25 },
+      { "id": "pseudo.pseudo_total_all_attributes", "label": "+# total to all Attributes", "min": 25 },
+      { "id": "explicit.stat_1379411836", "label": "# to all Attributes", "min": 20 },
       { "id": "explicit.stat_3917489142", "label": "#% increased Rarity of Items found", "min": 20 },
       { "id": "explicit.stat_2891184298", "label": "#% increased Cast Speed", "min": 10 },
-      { "id": "explicit.stat_681332047", "label": "#% increased Attack Speed", "min": 10 }
+      { "id": "explicit.stat_681332047", "label": "#% increased Attack Speed", "min": 10 },
+      { "id": "explicit.stat_1444556985", "label": "#% of Damage taken Recouped as Life", "min": 10 },
+      { "id": "explicit.stat_472520716", "label": "#% of Damage taken Recouped as Mana", "min": 10 }
+    ],
+    "presets": [
+      {
+        "id": "life-res",
+        "label": "Life Res",
+        "description": "Generic rare ring with life and resists.",
+        "stats": [
+          "pseudo.pseudo_total_life",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      },
+      {
+        "id": "mf-ring",
+        "label": "MF Ring",
+        "description": "Rarity ring with useful baseline stats.",
+        "stats": [
+          "explicit.stat_3917489142",
+          "pseudo.pseudo_total_life",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      },
+      {
+        "id": "caster-ring",
+        "label": "Caster Ring",
+        "description": "Cast speed, mana, and resistance.",
+        "stats": [
+          "explicit.stat_2891184298",
+          "pseudo.pseudo_total_mana",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      },
+      {
+        "id": "attack-ring",
+        "label": "Attack Ring",
+        "description": "Attack speed with life and resistance.",
+        "stats": [
+          "explicit.stat_681332047",
+          "pseudo.pseudo_total_life",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      }
     ]
   },
   {
@@ -116,8 +400,64 @@
       { "id": "explicit.stat_3035140377", "label": "# to Level of all Attack Skills", "min": 2 },
       { "id": "explicit.stat_2162097452", "label": "# to Level of all Minion Skills", "min": 2 },
       { "id": "pseudo.pseudo_total_life", "label": "+# total maximum Life", "min": 70 },
+      { "id": "pseudo.pseudo_total_mana", "label": "+# total maximum Mana", "min": 60 },
       { "id": "pseudo.pseudo_total_elemental_resistance", "label": "+#% total Elemental Resistance", "min": 60 },
+      { "id": "pseudo.pseudo_total_all_attributes", "label": "+# total to all Attributes", "min": 25 },
+      { "id": "explicit.stat_1379411836", "label": "# to all Attributes", "min": 20 },
+      { "id": "explicit.stat_3981240776", "label": "# to Spirit", "min": 30 },
       { "id": "explicit.stat_3917489142", "label": "#% increased Rarity of Items found", "min": 20 }
+    ],
+    "presets": [
+      {
+        "id": "all-skills",
+        "label": "All Skills",
+        "description": "Amulet with all skill levels and useful defenses.",
+        "stats": [
+          "explicit.stat_4283407333",
+          "pseudo.pseudo_total_life",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      },
+      {
+        "id": "spell-skills",
+        "label": "Spell Skills",
+        "description": "Caster amulet with spell levels.",
+        "stats": [
+          "explicit.stat_124131830",
+          "pseudo.pseudo_total_mana",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      },
+      {
+        "id": "attack-skills",
+        "label": "Attack Skills",
+        "description": "Attack amulet with gem levels and life.",
+        "stats": [
+          "explicit.stat_3035140377",
+          "pseudo.pseudo_total_life",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      },
+      {
+        "id": "minion-skills",
+        "label": "Minion Skills",
+        "description": "Minion amulet with levels and Spirit.",
+        "stats": [
+          "explicit.stat_2162097452",
+          "explicit.stat_3981240776",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      },
+      {
+        "id": "mf-amulet",
+        "label": "MF Amulet",
+        "description": "Rarity amulet with broad utility.",
+        "stats": [
+          "explicit.stat_3917489142",
+          "pseudo.pseudo_total_all_attributes",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      }
     ]
   },
   {
@@ -129,8 +469,44 @@
       { "id": "pseudo.pseudo_total_elemental_resistance", "label": "+#% total Elemental Resistance", "min": 70 },
       { "id": "pseudo.pseudo_total_chaos_resistance", "label": "+#% total to Chaos Resistance", "min": 25 },
       { "id": "explicit.stat_1416292992", "label": "# Charm Slots", "min": 2 },
+      { "id": "explicit.stat_2582079000", "label": "# Charm Slot", "min": 1 },
+      { "id": "explicit.stat_1389754388", "label": "#% increased Charm Effect Duration", "min": 20 },
+      { "id": "explicit.stat_3585532255", "label": "#% increased Charm Charges gained", "min": 20 },
+      { "id": "explicit.stat_1570770415", "label": "#% reduced Charm Charges used", "min": 10 },
       { "id": "explicit.stat_3917489142", "label": "#% increased Rarity of Items found", "min": 20 },
       { "id": "explicit.stat_2023107756", "label": "Recover #% of maximum Life on Kill", "min": 2 }
+    ],
+    "presets": [
+      {
+        "id": "two-charm-life-res",
+        "label": "2 Charm Life Res",
+        "description": "Charm-slot belt with core defenses.",
+        "stats": [
+          "explicit.stat_1416292992",
+          "pseudo.pseudo_total_life",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      },
+      {
+        "id": "charm-sustain",
+        "label": "Charm Sustain",
+        "description": "Belt focused on charm uptime.",
+        "stats": [
+          "explicit.stat_1416292992",
+          "explicit.stat_3585532255",
+          "explicit.stat_1570770415"
+        ]
+      },
+      {
+        "id": "mf-belt",
+        "label": "MF Belt",
+        "description": "Rarity belt with life and resistance.",
+        "stats": [
+          "explicit.stat_3917489142",
+          "pseudo.pseudo_total_life",
+          "pseudo.pseudo_total_elemental_resistance"
+        ]
+      }
     ]
   },
   {
@@ -143,7 +519,39 @@
       { "id": "explicit.stat_9187492", "label": "# to Level of all Melee Skills", "min": 2 },
       { "id": "explicit.stat_3035140377", "label": "# to Level of all Attack Skills", "min": 2 },
       { "id": "explicit.stat_587431675", "label": "#% increased Critical Hit Chance", "min": 20 },
-      { "id": "explicit.stat_3556824919", "label": "#% increased Critical Damage Bonus", "min": 20 }
+      { "id": "explicit.stat_3556824919", "label": "#% increased Critical Damage Bonus", "min": 20 },
+      { "id": "explicit.stat_2557965901", "label": "Leech #% of Physical Attack Damage as Life", "min": 2 },
+      { "id": "explicit.stat_707457662", "label": "Leech #% of Physical Attack Damage as Mana", "min": 2 }
+    ],
+    "presets": [
+      {
+        "id": "phys-dps",
+        "label": "Phys DPS",
+        "description": "Physical damage and local attack speed.",
+        "stats": [
+          "explicit.stat_1509134228",
+          "explicit.stat_210067635"
+        ]
+      },
+      {
+        "id": "crit-phys",
+        "label": "Crit Phys",
+        "description": "Physical weapon with crit scaling.",
+        "stats": [
+          "explicit.stat_1509134228",
+          "explicit.stat_587431675",
+          "explicit.stat_3556824919"
+        ]
+      },
+      {
+        "id": "attack-levels",
+        "label": "Attack Levels",
+        "description": "Weapon for gem-level attack scaling.",
+        "stats": [
+          "explicit.stat_3035140377",
+          "explicit.stat_210067635"
+        ]
+      }
     ]
   },
   {
@@ -156,7 +564,97 @@
       { "id": "explicit.stat_9187492", "label": "# to Level of all Melee Skills", "min": 2 },
       { "id": "explicit.stat_3035140377", "label": "# to Level of all Attack Skills", "min": 2 },
       { "id": "explicit.stat_587431675", "label": "#% increased Critical Hit Chance", "min": 20 },
+      { "id": "explicit.stat_3556824919", "label": "#% increased Critical Damage Bonus", "min": 20 },
+      { "id": "explicit.stat_2557965901", "label": "Leech #% of Physical Attack Damage as Life", "min": 2 },
+      { "id": "explicit.stat_707457662", "label": "Leech #% of Physical Attack Damage as Mana", "min": 2 }
+    ],
+    "presets": [
+      {
+        "id": "big-phys",
+        "label": "Big Phys",
+        "description": "Two-handed physical weapon baseline.",
+        "stats": [
+          "explicit.stat_1509134228",
+          "explicit.stat_210067635"
+        ]
+      },
+      {
+        "id": "crit-phys",
+        "label": "Crit Phys",
+        "description": "Two-handed weapon with crit scaling.",
+        "stats": [
+          "explicit.stat_1509134228",
+          "explicit.stat_587431675",
+          "explicit.stat_3556824919"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "spear",
+    "label": "Spear",
+    "category": "weapon.spear",
+    "stats": [
+      { "id": "explicit.stat_1509134228", "label": "#% increased Physical Damage", "min": 120 },
+      { "id": "explicit.stat_1165163804", "label": "#% increased Attack Speed with Spears", "min": 15 },
+      { "id": "explicit.stat_9187492", "label": "# to Level of all Melee Skills", "min": 2 },
+      { "id": "explicit.stat_3035140377", "label": "# to Level of all Attack Skills", "min": 2 },
+      { "id": "explicit.stat_587431675", "label": "#% increased Critical Hit Chance", "min": 20 },
+      { "id": "explicit.stat_2456523742", "label": "#% increased Critical Damage Bonus with Spears", "min": 20 }
+    ],
+    "presets": [
+      {
+        "id": "spear-dps",
+        "label": "Spear DPS",
+        "description": "Spear physical damage and spear attack speed.",
+        "stats": [
+          "explicit.stat_1509134228",
+          "explicit.stat_1165163804"
+        ]
+      },
+      {
+        "id": "spear-crit",
+        "label": "Spear Crit",
+        "description": "Crit spear setup.",
+        "stats": [
+          "explicit.stat_1509134228",
+          "explicit.stat_587431675",
+          "explicit.stat_2456523742"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "quarterstaff",
+    "label": "Quarterstaff",
+    "category": "weapon.warstaff",
+    "stats": [
+      { "id": "explicit.stat_1509134228", "label": "#% increased Physical Damage", "min": 120 },
+      { "id": "explicit.stat_3283482523", "label": "#% increased Attack Speed with Quarterstaves", "min": 15 },
+      { "id": "explicit.stat_9187492", "label": "# to Level of all Melee Skills", "min": 2 },
+      { "id": "explicit.stat_3035140377", "label": "# to Level of all Attack Skills", "min": 2 },
+      { "id": "explicit.stat_587431675", "label": "#% increased Critical Hit Chance", "min": 20 },
       { "id": "explicit.stat_3556824919", "label": "#% increased Critical Damage Bonus", "min": 20 }
+    ],
+    "presets": [
+      {
+        "id": "staff-dps",
+        "label": "Staff DPS",
+        "description": "Quarterstaff physical damage and speed.",
+        "stats": [
+          "explicit.stat_1509134228",
+          "explicit.stat_3283482523"
+        ]
+      },
+      {
+        "id": "melee-levels",
+        "label": "Melee Levels",
+        "description": "Quarterstaff for melee skill levels.",
+        "stats": [
+          "explicit.stat_9187492",
+          "explicit.stat_3283482523"
+        ]
+      }
     ]
   },
   {
@@ -169,7 +667,38 @@
       { "id": "explicit.stat_1202301673", "label": "# to Level of all Projectile Skills", "min": 2 },
       { "id": "explicit.stat_1839076647", "label": "#% increased Projectile Damage", "min": 25 },
       { "id": "explicit.stat_169946467", "label": "#% increased Accuracy Rating with Bows", "min": 80 },
-      { "id": "explicit.stat_587431675", "label": "#% increased Critical Hit Chance", "min": 20 }
+      { "id": "explicit.stat_587431675", "label": "#% increased Critical Hit Chance", "min": 20 },
+      { "id": "explicit.stat_3556824919", "label": "#% increased Critical Damage Bonus", "min": 20 }
+    ],
+    "presets": [
+      {
+        "id": "bow-dps",
+        "label": "Bow DPS",
+        "description": "Bow physical damage and attack speed.",
+        "stats": [
+          "explicit.stat_1509134228",
+          "explicit.stat_3759735052"
+        ]
+      },
+      {
+        "id": "projectile-levels",
+        "label": "Projectile Levels",
+        "description": "Projectile skill-level bow search.",
+        "stats": [
+          "explicit.stat_1202301673",
+          "explicit.stat_1839076647"
+        ]
+      },
+      {
+        "id": "bow-crit",
+        "label": "Bow Crit",
+        "description": "Bow damage with crit scaling.",
+        "stats": [
+          "explicit.stat_1509134228",
+          "explicit.stat_587431675",
+          "explicit.stat_3556824919"
+        ]
+      }
     ]
   },
   {
@@ -182,7 +711,38 @@
       { "id": "explicit.stat_1202301673", "label": "# to Level of all Projectile Skills", "min": 2 },
       { "id": "explicit.stat_1839076647", "label": "#% increased Projectile Damage", "min": 25 },
       { "id": "explicit.stat_803737631", "label": "# to Accuracy Rating", "min": 100 },
-      { "id": "explicit.stat_587431675", "label": "#% increased Critical Hit Chance", "min": 20 }
+      { "id": "explicit.stat_587431675", "label": "#% increased Critical Hit Chance", "min": 20 },
+      { "id": "explicit.stat_3556824919", "label": "#% increased Critical Damage Bonus", "min": 20 }
+    ],
+    "presets": [
+      {
+        "id": "crossbow-dps",
+        "label": "Crossbow DPS",
+        "description": "Crossbow physical damage and attack speed.",
+        "stats": [
+          "explicit.stat_1509134228",
+          "explicit.stat_1135928777"
+        ]
+      },
+      {
+        "id": "projectile-levels",
+        "label": "Projectile Levels",
+        "description": "Projectile skill-level crossbow search.",
+        "stats": [
+          "explicit.stat_1202301673",
+          "explicit.stat_1839076647"
+        ]
+      },
+      {
+        "id": "accuracy-crit",
+        "label": "Accuracy Crit",
+        "description": "Accuracy and crit scaling for crossbows.",
+        "stats": [
+          "explicit.stat_803737631",
+          "explicit.stat_587431675",
+          "explicit.stat_3556824919"
+        ]
+      }
     ]
   },
   {
@@ -196,7 +756,158 @@
       { "id": "explicit.stat_1545858329", "label": "# to Level of all Lightning Spell Skills", "min": 2 },
       { "id": "explicit.stat_591105508", "label": "# to Level of all Fire Spell Skills", "min": 2 },
       { "id": "explicit.stat_2254480358", "label": "# to Level of all Cold Spell Skills", "min": 2 },
-      { "id": "explicit.stat_4226189338", "label": "# to Level of all Chaos Spell Skills", "min": 2 }
+      { "id": "explicit.stat_4226189338", "label": "# to Level of all Chaos Spell Skills", "min": 2 },
+      { "id": "explicit.stat_1600707273", "label": "# to Level of all Physical Spell Skills", "min": 2 }
+    ],
+    "presets": [
+      {
+        "id": "spell-levels",
+        "label": "Spell Levels",
+        "description": "Generic caster weapon with all spell levels.",
+        "stats": [
+          "explicit.stat_124131830",
+          "explicit.stat_2891184298"
+        ]
+      },
+      {
+        "id": "spell-damage",
+        "label": "Spell Damage",
+        "description": "Spell damage and cast speed search.",
+        "stats": [
+          "explicit.stat_2974417149",
+          "explicit.stat_2891184298"
+        ]
+      },
+      {
+        "id": "elemental-spell",
+        "label": "Element Spell",
+        "description": "Elemental spell level options.",
+        "stats": [
+          "explicit.stat_1545858329",
+          "explicit.stat_591105508",
+          "explicit.stat_2254480358"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "wand",
+    "label": "Wand",
+    "category": "weapon.wand",
+    "stats": [
+      { "id": "explicit.stat_124131830", "label": "# to Level of all Spell Skills", "min": 2 },
+      { "id": "explicit.stat_2974417149", "label": "#% increased Spell Damage", "min": 60 },
+      { "id": "explicit.stat_2891184298", "label": "#% increased Cast Speed", "min": 15 },
+      { "id": "explicit.stat_1545858329", "label": "# to Level of all Lightning Spell Skills", "min": 2 },
+      { "id": "explicit.stat_591105508", "label": "# to Level of all Fire Spell Skills", "min": 2 },
+      { "id": "explicit.stat_2254480358", "label": "# to Level of all Cold Spell Skills", "min": 2 },
+      { "id": "explicit.stat_4226189338", "label": "# to Level of all Chaos Spell Skills", "min": 2 },
+      { "id": "explicit.stat_1600707273", "label": "# to Level of all Physical Spell Skills", "min": 2 }
+    ],
+    "presets": [
+      {
+        "id": "wand-levels",
+        "label": "Wand Levels",
+        "description": "Wand with spell levels and cast speed.",
+        "stats": [
+          "explicit.stat_124131830",
+          "explicit.stat_2891184298"
+        ]
+      },
+      {
+        "id": "wand-damage",
+        "label": "Wand Damage",
+        "description": "Wand with spell damage and speed.",
+        "stats": [
+          "explicit.stat_2974417149",
+          "explicit.stat_2891184298"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "sceptre",
+    "label": "Sceptre",
+    "category": "weapon.sceptre",
+    "stats": [
+      { "id": "explicit.stat_124131830", "label": "# to Level of all Spell Skills", "min": 2 },
+      { "id": "explicit.stat_2162097452", "label": "# to Level of all Minion Skills", "min": 2 },
+      { "id": "explicit.stat_3981240776", "label": "# to Spirit", "min": 30 },
+      { "id": "explicit.stat_3984865854", "label": "#% increased Spirit", "min": 20 },
+      { "id": "explicit.stat_1589917703", "label": "Minions deal #% increased Damage", "min": 40 },
+      { "id": "explicit.stat_770672621", "label": "Minions have #% increased maximum Life", "min": 40 },
+      { "id": "explicit.stat_3091578504", "label": "Minions have #% increased Attack and Cast Speed", "min": 10 },
+      { "id": "explicit.stat_1423639565", "label": "Minions have #% to all Elemental Resistances", "min": 15 },
+      { "id": "explicit.stat_289128254", "label": "Allies in your Presence have #% increased Cast Speed", "min": 8 },
+      { "id": "explicit.stat_1998951374", "label": "Allies in your Presence have #% increased Attack Speed", "min": 8 }
+    ],
+    "presets": [
+      {
+        "id": "minion-levels",
+        "label": "Minion Levels",
+        "description": "Sceptre for minion skill levels and Spirit.",
+        "stats": [
+          "explicit.stat_2162097452",
+          "explicit.stat_3981240776"
+        ]
+      },
+      {
+        "id": "minion-damage",
+        "label": "Minion Damage",
+        "description": "Minion damage and speed sceptre.",
+        "stats": [
+          "explicit.stat_1589917703",
+          "explicit.stat_3091578504",
+          "explicit.stat_770672621"
+        ]
+      },
+      {
+        "id": "presence-speed",
+        "label": "Presence Speed",
+        "description": "Ally presence speed modifiers.",
+        "stats": [
+          "explicit.stat_289128254",
+          "explicit.stat_1998951374"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "staff",
+    "label": "Staff",
+    "category": "weapon.staff",
+    "stats": [
+      { "id": "explicit.stat_124131830", "label": "# to Level of all Spell Skills", "min": 2 },
+      { "id": "explicit.stat_2974417149", "label": "#% increased Spell Damage", "min": 60 },
+      { "id": "explicit.stat_2891184298", "label": "#% increased Cast Speed", "min": 15 },
+      { "id": "explicit.stat_1545858329", "label": "# to Level of all Lightning Spell Skills", "min": 2 },
+      { "id": "explicit.stat_591105508", "label": "# to Level of all Fire Spell Skills", "min": 2 },
+      { "id": "explicit.stat_2254480358", "label": "# to Level of all Cold Spell Skills", "min": 2 },
+      { "id": "explicit.stat_4226189338", "label": "# to Level of all Chaos Spell Skills", "min": 2 },
+      { "id": "explicit.stat_1600707273", "label": "# to Level of all Physical Spell Skills", "min": 2 },
+      { "id": "explicit.stat_737908626", "label": "#% increased Critical Hit Chance for Spells", "min": 30 },
+      { "id": "explicit.stat_274716455", "label": "#% increased Critical Spell Damage Bonus", "min": 20 }
+    ],
+    "presets": [
+      {
+        "id": "staff-levels",
+        "label": "Staff Levels",
+        "description": "Staff with spell levels and cast speed.",
+        "stats": [
+          "explicit.stat_124131830",
+          "explicit.stat_2891184298"
+        ]
+      },
+      {
+        "id": "spell-crit",
+        "label": "Spell Crit",
+        "description": "Staff with spell crit chance and crit damage.",
+        "stats": [
+          "explicit.stat_737908626",
+          "explicit.stat_274716455",
+          "explicit.stat_2974417149"
+        ]
+      }
     ]
   }
 ]
