@@ -13,6 +13,8 @@ const TRADE_BASE_URL: &str = "https://www.pathofexile.com";
 const FETCH_PAGE_SIZE: usize = 10;
 const QUICK_JEWEL_FILTERS_JSON: &str = include_str!("../../src/lib/quick-jewel-filters.json");
 const EXACT_SELECTED_EXPLICIT_AFFIXES_FILTER_ID: &str = "misc:exact_selected_explicit_affixes";
+const EXACT_SELECTED_PREFIX_AFFIXES_FILTER_ID: &str = "misc:exact_selected_prefix_affixes";
+const EXACT_SELECTED_SUFFIX_AFFIXES_FILTER_ID: &str = "misc:exact_selected_suffix_affixes";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,7 +52,7 @@ impl TradeFilterSpec {
             TradeFilterKind::Stat { value, .. } => *value,
             TradeFilterKind::Category(_)
             | TradeFilterKind::ItemType { .. }
-            | TradeFilterKind::ExactSelectedExplicitAffixes => None,
+            | TradeFilterKind::ExactSelectedAffixes { .. } => None,
         }
     }
 
@@ -59,9 +61,16 @@ impl TradeFilterSpec {
             TradeFilterKind::Stat { max_value, .. } => *max_value,
             TradeFilterKind::Category(_)
             | TradeFilterKind::ItemType { .. }
-            | TradeFilterKind::ExactSelectedExplicitAffixes => None,
+            | TradeFilterKind::ExactSelectedAffixes { .. } => None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExactAffixScope {
+    Explicit,
+    Prefix,
+    Suffix,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -76,7 +85,9 @@ enum TradeFilterKind {
         value: Option<f64>,
         max_value: Option<f64>,
     },
-    ExactSelectedExplicitAffixes,
+    ExactSelectedAffixes {
+        scope: ExactAffixScope,
+    },
 }
 
 pub fn trade_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
@@ -103,25 +114,59 @@ pub fn trade_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
 
     let stat_specs = stat_filter_specs(item);
     if stat_specs.iter().any(is_explicit_stat_spec) {
-        specs.push(TradeFilterSpec {
-            id: EXACT_SELECTED_EXPLICIT_AFFIXES_FILTER_ID.to_string(),
-            label: "Only selected explicit affixes".to_string(),
-            selected_by_default: false,
-            source_modifier_index: None,
-            source: None,
-            affix_side: None,
-            score: None,
-            selection_reason: Some(
-                "Exact Match filters fetched listings to the selected explicit affix count."
-                    .to_string(),
-            ),
-            profile_ids: profile_ids(&["exact"]),
-            kind: TradeFilterKind::ExactSelectedExplicitAffixes,
-        });
+        specs.push(exact_selected_affix_filter_spec(ExactAffixScope::Explicit));
+    }
+    if stat_specs
+        .iter()
+        .any(|spec| is_explicit_stat_spec(spec) && spec.affix_side.as_deref() == Some("prefix"))
+    {
+        specs.push(exact_selected_affix_filter_spec(ExactAffixScope::Prefix));
+    }
+    if stat_specs
+        .iter()
+        .any(|spec| is_explicit_stat_spec(spec) && spec.affix_side.as_deref() == Some("suffix"))
+    {
+        specs.push(exact_selected_affix_filter_spec(ExactAffixScope::Suffix));
     }
 
     specs.extend(stat_specs);
     specs
+}
+
+fn exact_selected_affix_filter_spec(scope: ExactAffixScope) -> TradeFilterSpec {
+    let (id, label, affix_side, reason) = match scope {
+        ExactAffixScope::Explicit => (
+            EXACT_SELECTED_EXPLICIT_AFFIXES_FILTER_ID,
+            "Only selected explicit affixes",
+            None,
+            "Adds a # Modifiers exact-count trade filter and hides fetched listings with extra explicit mods.",
+        ),
+        ExactAffixScope::Prefix => (
+            EXACT_SELECTED_PREFIX_AFFIXES_FILTER_ID,
+            "Only selected prefixes",
+            Some("prefix"),
+            "Requires the result to have exactly the selected explicit prefix count.",
+        ),
+        ExactAffixScope::Suffix => (
+            EXACT_SELECTED_SUFFIX_AFFIXES_FILTER_ID,
+            "Only selected suffixes",
+            Some("suffix"),
+            "Requires the result to have exactly the selected explicit suffix count.",
+        ),
+    };
+
+    TradeFilterSpec {
+        id: id.to_string(),
+        label: label.to_string(),
+        selected_by_default: false,
+        source_modifier_index: None,
+        source: Some("pseudo".to_string()),
+        affix_side: affix_side.map(ToOwned::to_owned),
+        score: Some(7),
+        selection_reason: Some(reason.to_string()),
+        profile_ids: profile_ids(&["exact"]),
+        kind: TradeFilterKind::ExactSelectedAffixes { scope },
+    }
 }
 
 fn empty_affix_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
@@ -265,6 +310,7 @@ pub fn build_trade_query_with_values(
         .iter()
         .filter(|spec| selected.contains(spec.id.as_str()))
         .collect::<Vec<_>>();
+    let exact_affix_counts = selected_exact_affix_counts(&all_specs, &selected)?;
     let mut stat_filters = Vec::new();
     for spec in &selected_specs {
         match &spec.kind {
@@ -291,8 +337,18 @@ pub fn build_trade_query_with_values(
             }
             TradeFilterKind::Category(_)
             | TradeFilterKind::ItemType { .. }
-            | TradeFilterKind::ExactSelectedExplicitAffixes => {}
+            | TradeFilterKind::ExactSelectedAffixes { .. } => {}
         }
+    }
+    for exact_count in &exact_affix_counts {
+        stat_filters.push(json!({
+            "id": exact_affix_count_stat_id(exact_count.scope),
+            "disabled": false,
+            "value": {
+                "min": exact_count.count,
+                "max": exact_count.count
+            }
+        }));
     }
 
     let mut query = json!({
@@ -423,7 +479,7 @@ pub fn build_trade_query_with_values(
                     query["query"]["filters"]["type_filters"]["disabled"] = json!(false);
                 }
             }
-            TradeFilterKind::Stat { .. } | TradeFilterKind::ExactSelectedExplicitAffixes => {}
+            TradeFilterKind::Stat { .. } | TradeFilterKind::ExactSelectedAffixes { .. } => {}
         }
     }
 
@@ -548,9 +604,53 @@ pub fn selected_pseudo_stat_ids(
             TradeFilterKind::Stat { stat_id, .. } if stat_id.starts_with("pseudo.") => {
                 Some(stat_id)
             }
+            TradeFilterKind::ExactSelectedAffixes { scope } => {
+                Some(exact_affix_count_stat_id(scope).to_string())
+            }
             _ => None,
         })
         .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ExactAffixCount {
+    scope: ExactAffixScope,
+    count: usize,
+}
+
+fn selected_exact_affix_counts(
+    all_specs: &[TradeFilterSpec],
+    selected_filter_ids: &HashSet<&str>,
+) -> Result<Vec<ExactAffixCount>, String> {
+    let mut counts = Vec::new();
+
+    for scope in [
+        ExactAffixScope::Explicit,
+        ExactAffixScope::Prefix,
+        ExactAffixScope::Suffix,
+    ] {
+        if !selected_filter_ids.contains(exact_affix_filter_id(scope)) {
+            continue;
+        }
+
+        let count = all_specs
+            .iter()
+            .filter(|spec| selected_filter_ids.contains(spec.id.as_str()))
+            .filter(|spec| exact_affix_scope_matches(scope, spec))
+            .count();
+
+        if count == 0 {
+            return Err(format!(
+                "Select at least one explicit {}modifier filter before using {}.",
+                exact_affix_error_scope(scope),
+                exact_affix_label(scope)
+            ));
+        }
+
+        counts.push(ExactAffixCount { scope, count });
+    }
+
+    Ok(counts)
 }
 
 fn selected_exact_explicit_affix_count(
@@ -562,24 +662,12 @@ fn selected_exact_explicit_affix_count(
         .map(String::as_str)
         .collect::<HashSet<_>>();
 
-    if !selected.contains(EXACT_SELECTED_EXPLICIT_AFFIXES_FILTER_ID) {
-        return Ok(None);
-    }
-
-    let count = all_trade_filter_specs(item)
-        .iter()
-        .filter(|spec| selected.contains(spec.id.as_str()))
-        .filter(|spec| is_explicit_stat_spec(spec))
-        .count();
-
-    if count == 0 {
-        return Err(
-            "Select at least one explicit modifier filter before using Only selected explicit affixes."
-                .to_string(),
-        );
-    }
-
-    Ok(Some(count))
+    selected_exact_affix_counts(&all_trade_filter_specs(item), &selected).map(|counts| {
+        counts
+            .into_iter()
+            .find(|count| count.scope == ExactAffixScope::Explicit)
+            .map(|count| count.count)
+    })
 }
 
 fn apply_exact_selected_explicit_affix_filter(
@@ -594,6 +682,50 @@ fn apply_exact_selected_explicit_affix_filter(
         .into_iter()
         .filter(|listing| listing.item.explicit_mods.len() == exact_count)
         .collect()
+}
+
+fn exact_affix_scope_matches(scope: ExactAffixScope, spec: &TradeFilterSpec) -> bool {
+    if !is_explicit_stat_spec(spec) {
+        return false;
+    }
+
+    match scope {
+        ExactAffixScope::Explicit => true,
+        ExactAffixScope::Prefix => spec.affix_side.as_deref() == Some("prefix"),
+        ExactAffixScope::Suffix => spec.affix_side.as_deref() == Some("suffix"),
+    }
+}
+
+fn exact_affix_filter_id(scope: ExactAffixScope) -> &'static str {
+    match scope {
+        ExactAffixScope::Explicit => EXACT_SELECTED_EXPLICIT_AFFIXES_FILTER_ID,
+        ExactAffixScope::Prefix => EXACT_SELECTED_PREFIX_AFFIXES_FILTER_ID,
+        ExactAffixScope::Suffix => EXACT_SELECTED_SUFFIX_AFFIXES_FILTER_ID,
+    }
+}
+
+fn exact_affix_count_stat_id(scope: ExactAffixScope) -> &'static str {
+    match scope {
+        ExactAffixScope::Explicit => "pseudo.pseudo_number_of_affix_mods",
+        ExactAffixScope::Prefix => "pseudo.pseudo_number_of_prefix_mods",
+        ExactAffixScope::Suffix => "pseudo.pseudo_number_of_suffix_mods",
+    }
+}
+
+fn exact_affix_label(scope: ExactAffixScope) -> &'static str {
+    match scope {
+        ExactAffixScope::Explicit => "Only selected explicit affixes",
+        ExactAffixScope::Prefix => "Only selected prefixes",
+        ExactAffixScope::Suffix => "Only selected suffixes",
+    }
+}
+
+fn exact_affix_error_scope(scope: ExactAffixScope) -> &'static str {
+    match scope {
+        ExactAffixScope::Explicit => "",
+        ExactAffixScope::Prefix => "prefix ",
+        ExactAffixScope::Suffix => "suffix ",
+    }
 }
 
 pub fn build_fetch_url(
@@ -841,9 +973,10 @@ fn selected_stat_ids(item: &CapturedItem, selected_filter_ids: &[String]) -> Vec
         .filter(|spec| selected.contains(spec.id.as_str()))
         .filter_map(|spec| match spec.kind {
             TradeFilterKind::Stat { stat_id, .. } => Some(stat_id),
-            TradeFilterKind::Category(_)
-            | TradeFilterKind::ItemType { .. }
-            | TradeFilterKind::ExactSelectedExplicitAffixes => None,
+            TradeFilterKind::ExactSelectedAffixes { scope } => {
+                Some(exact_affix_count_stat_id(scope).to_string())
+            }
+            TradeFilterKind::Category(_) | TradeFilterKind::ItemType { .. } => None,
         })
         .collect::<Vec<_>>();
 
@@ -2032,8 +2165,49 @@ Item Level: 2";
 
         assert_eq!(exact_count, Some(2));
         assert_eq!(
-            query["query"]["filters"]["misc_filters"]["filters"]["explicit_count"],
-            serde_json::Value::Null
+            query["query"]["stats"][0]["filters"][2]["id"],
+            "pseudo.pseudo_number_of_affix_mods"
+        );
+        assert_eq!(query["query"]["stats"][0]["filters"][2]["value"]["min"], 2);
+        assert_eq!(query["query"]["stats"][0]["filters"][2]["value"]["max"], 2);
+    }
+
+    #[test]
+    fn query_builder_accepts_exact_selected_prefix_and_suffix_affix_filters() {
+        let item = parse_item_text(RARE_WITH_AFFIX_MARKERS).expect("rare item should parse");
+        let query = build_trade_query(
+            &item,
+            &[
+                "stat:explicit.stat_3299347043:0".to_string(),
+                "stat:explicit.stat_3372524247:1".to_string(),
+                "misc:exact_selected_prefix_affixes".to_string(),
+                "misc:exact_selected_suffix_affixes".to_string(),
+            ],
+        )
+        .expect("query should build");
+
+        let filters = query["query"]["stats"][0]["filters"]
+            .as_array()
+            .expect("stat filters");
+        let observed = filters
+            .iter()
+            .map(|filter| {
+                (
+                    filter["id"].as_str().expect("id"),
+                    filter["value"]["min"].as_i64().expect("min"),
+                    filter["value"]["max"].as_i64(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            observed,
+            vec![
+                ("explicit.stat_3299347043", 78, None),
+                ("explicit.stat_3372524247", 34, None),
+                ("pseudo.pseudo_number_of_prefix_mods", 1, Some(1)),
+                ("pseudo.pseudo_number_of_suffix_mods", 1, Some(1)),
+            ]
         );
     }
 
