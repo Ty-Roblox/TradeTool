@@ -36,6 +36,9 @@ pub struct TradeFilterSpec {
     pub label: String,
     pub selected_by_default: bool,
     pub source_modifier_index: Option<usize>,
+    pub score: Option<u8>,
+    pub selection_reason: Option<String>,
+    pub profile_ids: Vec<String>,
     kind: TradeFilterKind,
 }
 
@@ -83,6 +86,11 @@ pub fn trade_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
             label: format!("Category: {}", item.item_class.as_deref().unwrap_or("Item")),
             selected_by_default: true,
             source_modifier_index: None,
+            score: None,
+            selection_reason: Some(
+                "Category keeps the trade search on this item class.".to_string(),
+            ),
+            profile_ids: category_profile_ids(item),
             kind: TradeFilterKind::Category(category.to_string()),
         });
     }
@@ -94,6 +102,12 @@ pub fn trade_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
             label: "Only selected explicit affixes".to_string(),
             selected_by_default: false,
             source_modifier_index: None,
+            score: None,
+            selection_reason: Some(
+                "Exact Match filters fetched listings to the selected explicit affix count."
+                    .to_string(),
+            ),
+            profile_ids: profile_ids(&["exact"]),
             kind: TradeFilterKind::ExactSelectedExplicitAffixes,
         });
     }
@@ -811,6 +825,9 @@ fn quick_filter_specs() -> Vec<TradeFilterSpec> {
             label: format!("Jewel: {}", jewel.label),
             selected_by_default: false,
             source_modifier_index: None,
+            score: None,
+            selection_reason: None,
+            profile_ids: Vec::new(),
             kind: TradeFilterKind::ItemType {
                 type_name: jewel.base_type.clone(),
                 category: Some("jewel".to_string()),
@@ -823,6 +840,9 @@ fn quick_filter_specs() -> Vec<TradeFilterSpec> {
                 label: format!("{}: {}", jewel.label, stat.label),
                 selected_by_default: false,
                 source_modifier_index: None,
+                score: None,
+                selection_reason: None,
+                profile_ids: Vec::new(),
                 kind: TradeFilterKind::Stat {
                     stat_id: stat.id.clone(),
                     value: stat.min,
@@ -857,49 +877,19 @@ fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
         if let Some((stat_id, label, value)) = mapped_charm_slots(&text) {
             keyed_specs.push((
                 modifier.index,
-                TradeFilterSpec {
-                    id: format!("stat:{stat_id}:{}", modifier.index),
-                    label,
-                    selected_by_default: true,
-                    source_modifier_index: Some(modifier.index),
-                    kind: TradeFilterKind::Stat {
-                        stat_id,
-                        value: Some(value),
-                        max_value: None,
-                    },
-                },
+                stat_filter_spec(stat_id, label, modifier.index, Some(value), None),
             ));
         } else if let Some((stat_id, label, max_value)) = mapped_reduced_poison_duration(&text) {
             keyed_specs.push((
                 modifier.index,
-                TradeFilterSpec {
-                    id: format!("stat:{stat_id}:{}", modifier.index),
-                    label,
-                    selected_by_default: true,
-                    source_modifier_index: Some(modifier.index),
-                    kind: TradeFilterKind::Stat {
-                        stat_id,
-                        value: None,
-                        max_value: Some(max_value),
-                    },
-                },
+                stat_filter_spec(stat_id, label, modifier.index, None, Some(max_value)),
             ));
         } else if let Some((stat_id, label, value)) =
             mapped_official_stat(&text, item.item_class.as_deref())
         {
             keyed_specs.push((
                 modifier.index,
-                TradeFilterSpec {
-                    id: format!("stat:{stat_id}:{}", modifier.index),
-                    label,
-                    selected_by_default: true,
-                    source_modifier_index: Some(modifier.index),
-                    kind: TradeFilterKind::Stat {
-                        stat_id,
-                        value,
-                        max_value: None,
-                    },
-                },
+                stat_filter_spec(stat_id, label, modifier.index, value, None),
             ));
         }
 
@@ -914,25 +904,191 @@ fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
     if elemental_resistance_total > 0.0 {
         keyed_specs.push((
             first_resistance_index.unwrap_or(usize::MAX),
-            TradeFilterSpec {
-                id: "stat:pseudo.pseudo_total_elemental_resistance".to_string(),
-                label: format!(
+            stat_filter_spec_with_source(
+                "pseudo.pseudo_total_elemental_resistance".to_string(),
+                format!(
                     "Total Elemental Resistance: {}%+",
                     format_filter_value(elemental_resistance_total)
                 ),
-                selected_by_default: true,
-                source_modifier_index: first_resistance_index,
-                kind: TradeFilterKind::Stat {
-                    stat_id: "pseudo.pseudo_total_elemental_resistance".to_string(),
-                    value: Some(elemental_resistance_total),
-                    max_value: None,
-                },
-            },
+                "stat:pseudo.pseudo_total_elemental_resistance".to_string(),
+                first_resistance_index,
+                Some(elemental_resistance_total),
+                None,
+            ),
         ));
     }
 
+    apply_quick_profile_selection(&mut keyed_specs);
     keyed_specs.sort_by_key(|(index, _)| *index);
     keyed_specs.into_iter().map(|(_, spec)| spec).collect()
+}
+
+fn stat_filter_spec(
+    stat_id: String,
+    label: String,
+    modifier_index: usize,
+    value: Option<f64>,
+    max_value: Option<f64>,
+) -> TradeFilterSpec {
+    stat_filter_spec_with_source(
+        stat_id.clone(),
+        label,
+        format!("stat:{stat_id}:{modifier_index}"),
+        Some(modifier_index),
+        value,
+        max_value,
+    )
+}
+
+fn stat_filter_spec_with_source(
+    stat_id: String,
+    label: String,
+    id: String,
+    source_modifier_index: Option<usize>,
+    value: Option<f64>,
+    max_value: Option<f64>,
+) -> TradeFilterSpec {
+    let (score, selection_reason) = stat_score_and_reason(&stat_id, &label);
+
+    TradeFilterSpec {
+        id,
+        label,
+        selected_by_default: false,
+        source_modifier_index,
+        score: Some(score),
+        selection_reason: Some(selection_reason),
+        profile_ids: profile_ids(&["exact"]),
+        kind: TradeFilterKind::Stat {
+            stat_id,
+            value,
+            max_value,
+        },
+    }
+}
+
+fn apply_quick_profile_selection(keyed_specs: &mut [(usize, TradeFilterSpec)]) {
+    let selected_ids = {
+        let mut scored = keyed_specs
+            .iter()
+            .filter_map(|(index, spec)| spec.score.map(|score| (score, *index, spec.id.clone())))
+            .filter(|(score, _, _)| *score >= 3)
+            .collect::<Vec<_>>();
+
+        scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+        scored
+            .into_iter()
+            .take(4)
+            .map(|(_, _, id)| id)
+            .collect::<HashSet<_>>()
+    };
+
+    for (_, spec) in keyed_specs {
+        if selected_ids.contains(&spec.id) {
+            spec.selected_by_default = true;
+            if !spec.profile_ids.iter().any(|profile| profile == "quick") {
+                spec.profile_ids.push("quick".to_string());
+            }
+        }
+    }
+}
+
+fn stat_score_and_reason(stat_id: &str, label: &str) -> (u8, String) {
+    let label_lower = label.to_ascii_lowercase();
+
+    if stat_id == "pseudo.pseudo_total_elemental_resistance" {
+        return (
+            8,
+            "Total elemental resistance is a high-signal pseudo stat.".to_string(),
+        );
+    }
+
+    if label_lower.contains("rarity of items") {
+        return (
+            8,
+            "Item rarity is a high-signal magic-find price stat.".to_string(),
+        );
+    }
+
+    if label_lower.contains("charm slot") {
+        return (
+            8,
+            "Charm slots are scarce and strongly affect belt value.".to_string(),
+        );
+    }
+
+    if label_lower.contains("level of all") || label_lower.contains("skills") {
+        return (8, "Skill levels are usually a premium affix.".to_string());
+    }
+
+    if label_lower.contains("maximum life") {
+        return (7, "Life is a high-signal price stat.".to_string());
+    }
+
+    if label_lower.contains("maximum energy shield") {
+        return (
+            7,
+            "Flat Energy Shield is a high-signal defensive stat.".to_string(),
+        );
+    }
+
+    if label_lower.contains("resistance") {
+        return (
+            6,
+            "Resistance rolls are common trade comparators.".to_string(),
+        );
+    }
+
+    if label_lower.contains("increased energy shield")
+        || label_lower.contains("evasion rating")
+        || label_lower.contains("armour")
+    {
+        return (
+            5,
+            "Defence rolls are useful when pricing gear bases and upgrades.".to_string(),
+        );
+    }
+
+    if label_lower.contains("spirit") || label_lower.contains("attribute") {
+        return (
+            5,
+            "Attribute-style utility rolls can materially affect value.".to_string(),
+        );
+    }
+
+    if label_lower.contains("damage")
+        || label_lower.contains("attack speed")
+        || label_lower.contains("critical")
+    {
+        return (
+            5,
+            "Offensive rolls are useful comparison stats.".to_string(),
+        );
+    }
+
+    if label_lower.contains("stun threshold") || label_lower.contains("poison duration") {
+        return (
+            3,
+            "This mapped utility roll is searchable but lower priority for Quick Price."
+                .to_string(),
+        );
+    }
+
+    (
+        3,
+        "Mapped modifier can be searched and is available for exact pricing.".to_string(),
+    )
+}
+
+fn category_profile_ids(item: &CapturedItem) -> Vec<String> {
+    if is_gem_item_class(item.item_class.as_deref()) {
+        profile_ids(&["quick", "exact"])
+    } else {
+        profile_ids(&["quick", "crafting-base", "exact"])
+    }
+}
+
+fn profile_ids(ids: &[&str]) -> Vec<String> {
+    ids.iter().map(|id| (*id).to_string()).collect()
 }
 
 pub fn socket_count(sockets: &str) -> Option<u32> {

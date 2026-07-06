@@ -1,4 +1,4 @@
-use crate::models::{AppDiagnostic, CapturedItem, FilterCandidate, FilterGroup};
+use crate::models::{AppDiagnostic, CapturedItem, FilterCandidate, FilterGroup, PriceCheckProfile};
 use crate::trade::{
     gem_level, is_gem_item_class, mapped_explicit_modifier_indices,
     should_show_unsupported_modifier, socket_count, trade_filter_specs,
@@ -18,6 +18,9 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
             selected_by_default: spec.selected_by_default,
             supported: true,
             unsupported_reason: None,
+            score: spec.score,
+            selection_reason: spec.selection_reason,
+            profile_ids: spec.profile_ids,
         })
         .collect::<Vec<_>>();
 
@@ -31,23 +34,33 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
 
     let mut identity = Vec::new();
     if let Some(base_type) = &item.base_type {
+        let profile_ids = identity_type_profile_ids(item, is_gem);
         identity.push(FilterCandidate {
             id: "identity:type".to_string(),
             label: format!("Base type: {base_type}"),
-            selected_by_default: is_gem,
+            selected_by_default: profile_ids.iter().any(|profile| profile == "quick"),
             supported: true,
             unsupported_reason: None,
+            score: None,
+            selection_reason: Some("Identity is useful for exact and base searches.".to_string()),
+            profile_ids,
             default_min: None,
             default_max: None,
         });
     }
     if let Some(rarity) = &item.rarity {
+        let profile_ids = rarity_profile_ids(item, is_gem);
         identity.push(FilterCandidate {
             id: "identity:rarity".to_string(),
             label: format!("Rarity: {rarity}"),
-            selected_by_default: is_gem,
+            selected_by_default: profile_ids.iter().any(|profile| profile == "quick"),
             supported: true,
             unsupported_reason: None,
+            score: None,
+            selection_reason: Some(
+                "Rarity keeps exact searches on the same item tier.".to_string(),
+            ),
+            profile_ids,
             default_min: None,
             default_max: None,
         });
@@ -68,6 +81,9 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
             selected_by_default: true,
             supported: true,
             unsupported_reason: None,
+            score: Some(8),
+            selection_reason: Some("Gem level is usually the main gem price driver.".to_string()),
+            profile_ids: profile_ids(&["quick", "exact"]),
             default_min: Some(level as f64),
             default_max: None,
         });
@@ -79,17 +95,34 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
             selected_by_default: false,
             supported: true,
             unsupported_reason: None,
+            score: None,
+            selection_reason: Some(
+                "Item level is most useful for crafting base searches.".to_string(),
+            ),
+            profile_ids: profile_ids(&["crafting-base", "exact"]),
             default_min: Some(item_level as f64),
             default_max: None,
         });
     }
     if let Some(quality) = item.quality {
+        let profile_ids = if is_gem {
+            profile_ids(&["quick", "exact"])
+        } else {
+            profile_ids(&["crafting-base", "exact"])
+        };
         misc.push(FilterCandidate {
             id: "property:quality".to_string(),
             label: format!("Quality: {quality}%+"),
-            selected_by_default: is_gem,
+            selected_by_default: profile_ids.iter().any(|profile| profile == "quick"),
             supported: true,
             unsupported_reason: None,
+            score: is_gem.then_some(5),
+            selection_reason: Some(if is_gem {
+                "Gem quality can materially change gem value.".to_string()
+            } else {
+                "Quality is most useful for base and exact searches.".to_string()
+            }),
+            profile_ids,
             default_min: Some(quality as f64),
             default_max: None,
         });
@@ -102,6 +135,11 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
                 selected_by_default: false,
                 supported: true,
                 unsupported_reason: None,
+                score: None,
+                selection_reason: Some(
+                    "Sockets are useful for crafting base and exact searches.".to_string(),
+                ),
+                profile_ids: profile_ids(&["crafting-base", "exact"]),
                 default_min: Some(count as f64),
                 default_max: None,
             }),
@@ -113,6 +151,9 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
                 unsupported_reason: Some(
                     "Socket filters need POE2-specific trade mapping.".to_string(),
                 ),
+                score: None,
+                selection_reason: None,
+                profile_ids: Vec::new(),
                 default_min: None,
                 default_max: None,
             }),
@@ -141,6 +182,9 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
                 unsupported_reason: Some(
                     "Modifier stat ID mapping will expand from real POE2 fixtures.".to_string(),
                 ),
+                score: None,
+                selection_reason: None,
+                profile_ids: Vec::new(),
                 default_min: None,
                 default_max: None,
             })
@@ -158,6 +202,70 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
     }
 
     groups
+}
+
+pub fn generate_price_check_profiles(groups: &[FilterGroup]) -> Vec<PriceCheckProfile> {
+    let all_filters = groups
+        .iter()
+        .flat_map(|group| group.filters.iter())
+        .filter(|filter| filter.supported)
+        .collect::<Vec<_>>();
+    let mut profiles = Vec::new();
+
+    for (id, label, description) in [
+        (
+            "quick",
+            "Quick Price",
+            "Preselects the highest-signal mapped stats for a fast comparable search.",
+        ),
+        (
+            "crafting-base",
+            "Crafting Base",
+            "Focuses on base type, item level, quality, and sockets instead of finished-item affixes.",
+        ),
+        (
+            "exact",
+            "Exact Match",
+            "Includes identity and every mapped stat for stricter comparisons.",
+        ),
+    ] {
+        let filter_ids = all_filters
+            .iter()
+            .filter(|filter| filter.profile_ids.iter().any(|profile| profile == id))
+            .map(|filter| filter.id.clone())
+            .collect::<Vec<_>>();
+
+        if !filter_ids.is_empty() {
+            profiles.push(PriceCheckProfile {
+                id: id.to_string(),
+                label: label.to_string(),
+                description: description.to_string(),
+                filter_ids,
+            });
+        }
+    }
+
+    profiles
+}
+
+fn identity_type_profile_ids(item: &CapturedItem, is_gem: bool) -> Vec<String> {
+    if is_gem || item.rarity.as_deref() == Some("Unique") {
+        profile_ids(&["quick", "crafting-base", "exact"])
+    } else {
+        profile_ids(&["crafting-base", "exact"])
+    }
+}
+
+fn rarity_profile_ids(item: &CapturedItem, is_gem: bool) -> Vec<String> {
+    if is_gem || item.rarity.as_deref() == Some("Unique") {
+        profile_ids(&["quick", "exact"])
+    } else {
+        profile_ids(&["exact"])
+    }
+}
+
+fn profile_ids(ids: &[&str]) -> Vec<String> {
+    ids.iter().map(|id| (*id).to_string()).collect()
 }
 
 pub fn generate_capture_diagnostics(groups: &[FilterGroup]) -> Vec<AppDiagnostic> {
@@ -189,7 +297,9 @@ pub fn generate_capture_diagnostics(groups: &[FilterGroup]) -> Vec<AppDiagnostic
 
 #[cfg(test)]
 mod tests {
-    use crate::filters::{generate_capture_diagnostics, generate_filter_groups};
+    use crate::filters::{
+        generate_capture_diagnostics, generate_filter_groups, generate_price_check_profiles,
+    };
     use crate::parser::parse_item_text;
 
     const RARE_BODY_ARMOUR: &str = "Item Class: Body Armours
@@ -289,6 +399,82 @@ Item Level: 15";
         assert!(life_filter.label.contains("maximum Life"));
         assert!(life_filter.supported);
         assert!(life_filter.selected_by_default);
+        assert_eq!(life_filter.score, Some(7));
+        assert_eq!(
+            life_filter.selection_reason.as_deref(),
+            Some("Life is a high-signal price stat.")
+        );
+        assert!(life_filter
+            .profile_ids
+            .iter()
+            .any(|profile| profile == "quick"));
+        assert!(life_filter
+            .profile_ids
+            .iter()
+            .any(|profile| profile == "exact"));
+    }
+
+    #[test]
+    fn generates_smart_price_check_profiles_from_scored_filters() {
+        let item = parse_item_text(
+            "Item Class: Boots
+Rarity: Rare
+Cataclysm Road
+Bound Sandals
+--------
+Quality: +20%
+Energy Shield: 335
+--------
+Sockets: S
+--------
+Item Level: 82
+--------
++43 to maximum Energy Shield
+124% increased Energy Shield
+18% increased Rarity of Items found
++31% to Lightning Resistance
++101 to Stun Threshold",
+        )
+        .expect("boots should parse");
+        let groups = generate_filter_groups(&item);
+        let profiles = generate_price_check_profiles(&groups);
+
+        let quick = profiles
+            .iter()
+            .find(|profile| profile.id == "quick")
+            .expect("quick price profile");
+        assert_eq!(quick.label, "Quick Price");
+        assert!(quick
+            .filter_ids
+            .contains(&"category:armour.boots".to_string()));
+        assert!(quick
+            .filter_ids
+            .contains(&"stat:explicit.stat_3917489142:2".to_string()));
+        assert!(quick
+            .filter_ids
+            .contains(&"stat:pseudo.pseudo_total_elemental_resistance".to_string()));
+        assert!(!quick
+            .filter_ids
+            .contains(&"stat:explicit.stat_915769802:4".to_string()));
+
+        let exact = profiles
+            .iter()
+            .find(|profile| profile.id == "exact")
+            .expect("exact match profile");
+        assert!(exact
+            .filter_ids
+            .contains(&"misc:exact_selected_explicit_affixes".to_string()));
+        assert!(exact
+            .filter_ids
+            .contains(&"stat:explicit.stat_915769802:4".to_string()));
+
+        let crafting = profiles
+            .iter()
+            .find(|profile| profile.id == "crafting-base")
+            .expect("crafting base profile");
+        assert!(crafting.filter_ids.contains(&"identity:type".to_string()));
+        assert!(crafting.filter_ids.contains(&"misc:item_level".to_string()));
+        assert!(!crafting.filter_ids.contains(&"identity:rarity".to_string()));
     }
 
     #[test]

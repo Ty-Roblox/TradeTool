@@ -63,9 +63,24 @@ pub struct FilterCandidate {
     pub supported: bool,
     pub unsupported_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profile_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub default_min: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_max: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PriceCheckProfile {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub filter_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -82,6 +97,7 @@ pub struct CaptureResponse {
     pub hotkey: String,
     pub item: CapturedItem,
     pub filter_groups: Vec<FilterGroup>,
+    pub price_check_profiles: Vec<PriceCheckProfile>,
     pub diagnostics: Vec<AppDiagnostic>,
 }
 

@@ -35,6 +35,9 @@
     selectedByDefault: boolean;
     supported: boolean;
     unsupportedReason?: string;
+    score?: number;
+    selectionReason?: string;
+    profileIds: string[];
     defaultMin?: number | null;
     defaultMax?: number | null;
   };
@@ -51,10 +54,18 @@
     detail?: string;
   };
 
+  type PriceCheckProfile = {
+    id: string;
+    label: string;
+    description: string;
+    filterIds: string[];
+  };
+
   type CaptureResponse = {
     hotkey: string;
     item: CapturedItem;
     filterGroups: FilterGroup[];
+    priceCheckProfiles: PriceCheckProfile[];
     diagnostics: AppDiagnostic[];
   };
 
@@ -143,6 +154,7 @@
   let selectedFilterIds = $state<string[]>([]);
   let selectedQuickFilterIds = $state<string[]>([]);
   let filterRanges = $state<Record<string, FilterRange>>({});
+  let activePriceProfileId = $state("");
   let activeFilterTab = $state<"item" | "jewels">("jewels");
   let activeJewelId = $state(quickJewels[0]?.id ?? "");
   let quickStatId = $state(quickJewels[0]?.stats[0]?.id ?? "");
@@ -191,10 +203,13 @@
   function applyCapture(response: CaptureResponse, status: string) {
     capture = response;
     rawText = response.item.rawText;
-    selectedFilterIds = response.filterGroups
-      .flatMap((group) => group.filters)
-      .filter((filter) => filter.supported && filter.selectedByDefault)
-      .map((filter) => filter.id);
+    activePriceProfileId = response.priceCheckProfiles[0]?.id ?? "";
+    selectedFilterIds =
+      response.priceCheckProfiles[0]?.filterIds ??
+      response.filterGroups
+        .flatMap((group) => group.filters)
+        .filter((filter) => filter.supported && filter.selectedByDefault)
+        .map((filter) => filter.id);
     filterRanges = {
       ...quickFilterRanges(),
       ...rangeDefaultsForFilterGroups(response.filterGroups)
@@ -211,6 +226,7 @@
   function clearCurrentCapture() {
     capture = null;
     selectedFilterIds = [];
+    activePriceProfileId = "";
     tradeResult = null;
     teleportStatuses = {};
     filterRanges = quickFilterRanges();
@@ -450,6 +466,7 @@
 
   function toggleFilter(id: string, checked: boolean) {
     const filter = findCaptureFilter(id);
+    activePriceProfileId = "";
 
     selectedFilterIds = checked
       ? Array.from(new Set([...selectedFilterIds, id]))
@@ -459,6 +476,18 @@
       ensureFilterRange(id, filter.defaultMin, filter.defaultMax);
     }
 
+    clearSearchResult();
+  }
+
+  function applyPriceProfile(profile: PriceCheckProfile) {
+    selectedFilterIds = profile.filterIds;
+    activePriceProfileId = profile.id;
+    for (const id of profile.filterIds) {
+      const filter = findCaptureFilter(id);
+      if (filter) {
+        ensureFilterRange(id, filter.defaultMin, filter.defaultMax);
+      }
+    }
     clearSearchResult();
   }
 
@@ -926,6 +955,32 @@
           </div>
         </div>
 
+        {#if capture.priceCheckProfiles.length}
+          <section class="profile-panel" aria-label="Price check profiles">
+            <div class="profile-heading">
+              <div>
+                <span class="eyebrow">Smart price check</span>
+                <h3>{capture.priceCheckProfiles.find((profile) => profile.id === activePriceProfileId)?.label ?? "Custom Filters"}</h3>
+              </div>
+              <span>{activePriceProfileId ? "Profile" : "Custom"}</span>
+            </div>
+            <div class="profile-grid">
+              {#each capture.priceCheckProfiles as profile}
+                <button
+                  class:profile-active={activePriceProfileId === profile.id}
+                  type="button"
+                  onclick={() => applyPriceProfile(profile)}
+                  disabled={searching}
+                >
+                  <strong>{profile.label}</strong>
+                  <span>{profile.description}</span>
+                  <small>{profile.filterIds.length} filters</small>
+                </button>
+              {/each}
+            </div>
+          </section>
+        {/if}
+
         {#if capture.diagnostics.length}
           <section class="diagnostics-panel">
             <div class="diagnostics-heading">
@@ -969,6 +1024,16 @@
                   />
                   <div class="filter-content">
                     <span>{filter.label}</span>
+                    {#if filter.score || filter.selectionReason}
+                      <div class="filter-meta">
+                        {#if filter.score}
+                          <strong>Score {filter.score}</strong>
+                        {/if}
+                        {#if filter.selectionReason}
+                          <small>{filter.selectionReason}</small>
+                        {/if}
+                      </div>
+                    {/if}
                     {#if filter.supported && isSelected(filter.id) && filterRanges[filter.id]}
                       <div class="range-controls" aria-label={`${filter.label} range`}>
                         <label>
@@ -1800,6 +1865,86 @@
     overflow-wrap: anywhere;
   }
 
+  .profile-panel {
+    display: grid;
+    gap: 10px;
+    margin: 0 0 16px;
+    padding: 12px;
+    border: 1px solid rgba(214, 179, 106, 0.28);
+    border-radius: 8px;
+    background:
+      linear-gradient(135deg, rgba(214, 179, 106, 0.08), rgba(45, 159, 137, 0.06)),
+      var(--surface-subtle);
+  }
+
+  .profile-heading {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .profile-heading h3 {
+    margin-top: 4px;
+    color: var(--ink);
+    font-size: 0.98rem;
+  }
+
+  .profile-heading > span {
+    display: inline-flex;
+    min-height: 24px;
+    align-items: center;
+    padding: 0 9px;
+    border: 1px solid rgba(214, 179, 106, 0.3);
+    border-radius: 999px;
+    color: #f2d89a;
+    background: rgba(214, 179, 106, 0.1);
+    font-size: 0.72rem;
+    font-weight: 800;
+  }
+
+  .profile-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .profile-grid button {
+    display: grid;
+    gap: 5px;
+    min-height: 86px;
+    padding: 10px;
+    border-color: var(--line);
+    color: var(--ink);
+    background: var(--surface);
+    text-align: left;
+  }
+
+  .profile-grid button:hover,
+  .profile-grid button.profile-active {
+    border-color: var(--primary);
+    background: rgba(214, 179, 106, 0.12);
+  }
+
+  .profile-grid strong,
+  .profile-grid span,
+  .profile-grid small {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .profile-grid span {
+    color: var(--muted);
+    font-size: 0.76rem;
+    line-height: 1.3;
+  }
+
+  .profile-grid small {
+    color: #8ee6d4;
+    font-size: 0.72rem;
+    font-weight: 800;
+  }
+
   .filters {
     display: grid;
     gap: 14px;
@@ -1871,6 +2016,34 @@
     min-width: 0;
   }
 
+  .filter-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 0.72rem;
+    line-height: 1.3;
+  }
+
+  .filter-meta strong {
+    display: inline-flex;
+    min-height: 22px;
+    align-items: center;
+    padding: 0 7px;
+    border: 1px solid rgba(45, 159, 137, 0.36);
+    border-radius: 999px;
+    color: #8ee6d4;
+    background: rgba(45, 159, 137, 0.12);
+    font-size: 0.7rem;
+  }
+
+  .filter-meta small {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--muted);
+  }
+
   .filter-row span,
   .filter-content span {
     min-width: 0;
@@ -1915,7 +2088,7 @@
     max-width: none;
   }
 
-  .filter-row small {
+  .filter-row > small {
     grid-column: 2;
     color: var(--warning);
     line-height: 1.3;
@@ -2259,6 +2432,10 @@
     }
 
     .quick-builder {
+      grid-template-columns: 1fr;
+    }
+
+    .profile-grid {
       grid-template-columns: 1fr;
     }
 

@@ -32,14 +32,13 @@ async fn search_trade(
         _ => models::CapturedItem::empty(),
     };
 
-    let response =
-        trade::search_trade(
-            &request.league,
-            &item,
-            &request.selected_filter_ids,
-            &request.selected_filter_values,
-        )
-        .await?;
+    let response = trade::search_trade(
+        &request.league,
+        &item,
+        &request.selected_filter_ids,
+        &request.selected_filter_values,
+    )
+    .await?;
     firefox_bridge::replace_listing_tokens(&response.listings, response.fetch_url.as_deref());
     Ok(response)
 }
@@ -70,12 +69,14 @@ async fn teleport_to_hideout(
 fn build_capture_response(raw_text: String) -> Result<models::CaptureResponse, String> {
     let item = parser::parse_item_text(&raw_text)?;
     let filter_groups = filters::generate_filter_groups(&item);
+    let price_check_profiles = filters::generate_price_check_profiles(&filter_groups);
     let diagnostics = filters::generate_capture_diagnostics(&filter_groups);
 
     Ok(models::CaptureResponse {
         hotkey: capture::CAPTURE_HOTKEY.to_string(),
         item,
         filter_groups,
+        price_check_profiles,
         diagnostics,
     })
 }
