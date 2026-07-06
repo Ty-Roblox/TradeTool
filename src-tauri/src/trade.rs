@@ -114,26 +114,38 @@ pub fn trade_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
 
     let stat_specs = stat_filter_specs(item);
     if stat_specs.iter().any(is_explicit_stat_spec) {
-        specs.push(exact_selected_affix_filter_spec(ExactAffixScope::Explicit));
+        specs.push(exact_selected_affix_filter_spec(
+            ExactAffixScope::Explicit,
+            item.rarity.as_deref() == Some("Magic"),
+        ));
     }
     if stat_specs
         .iter()
         .any(|spec| is_explicit_stat_spec(spec) && spec.affix_side.as_deref() == Some("prefix"))
     {
-        specs.push(exact_selected_affix_filter_spec(ExactAffixScope::Prefix));
+        specs.push(exact_selected_affix_filter_spec(
+            ExactAffixScope::Prefix,
+            false,
+        ));
     }
     if stat_specs
         .iter()
         .any(|spec| is_explicit_stat_spec(spec) && spec.affix_side.as_deref() == Some("suffix"))
     {
-        specs.push(exact_selected_affix_filter_spec(ExactAffixScope::Suffix));
+        specs.push(exact_selected_affix_filter_spec(
+            ExactAffixScope::Suffix,
+            false,
+        ));
     }
 
     specs.extend(stat_specs);
     specs
 }
 
-fn exact_selected_affix_filter_spec(scope: ExactAffixScope) -> TradeFilterSpec {
+fn exact_selected_affix_filter_spec(
+    scope: ExactAffixScope,
+    quick_profile: bool,
+) -> TradeFilterSpec {
     let (id, label, affix_side, reason) = match scope {
         ExactAffixScope::Explicit => (
             EXACT_SELECTED_EXPLICIT_AFFIXES_FILTER_ID,
@@ -155,16 +167,21 @@ fn exact_selected_affix_filter_spec(scope: ExactAffixScope) -> TradeFilterSpec {
         ),
     };
 
+    let mut profile_ids = profile_ids(&["exact"]);
+    if quick_profile {
+        profile_ids.push("quick".to_string());
+    }
+
     TradeFilterSpec {
         id: id.to_string(),
         label: label.to_string(),
-        selected_by_default: false,
+        selected_by_default: quick_profile,
         source_modifier_index: None,
         source: Some("pseudo".to_string()),
         affix_side: affix_side.map(ToOwned::to_owned),
         score: Some(7),
         selection_reason: Some(reason.to_string()),
-        profile_ids: profile_ids(&["exact"]),
+        profile_ids,
         kind: TradeFilterKind::ExactSelectedAffixes { scope },
     }
 }
@@ -1200,7 +1217,7 @@ fn stat_filter_spec_with_source(
     value: Option<f64>,
     max_value: Option<f64>,
 ) -> TradeFilterSpec {
-    let (score, selection_reason) = stat_score_and_reason(&stat_id, &label);
+    let (score, selection_reason) = stat_score_and_reason(&stat_id, &label, value, max_value);
 
     TradeFilterSpec {
         id,
@@ -1222,8 +1239,14 @@ fn stat_filter_spec_with_source(
 
 fn apply_quick_profile_selection(keyed_specs: &mut [(usize, TradeFilterSpec)]) {
     let selected_ids = {
+        let has_total_elemental_resistance = keyed_specs
+            .iter()
+            .any(|(_, spec)| is_total_elemental_resistance_spec(spec));
         let mut scored = keyed_specs
             .iter()
+            .filter(|(_, spec)| {
+                !(has_total_elemental_resistance && is_individual_elemental_resistance_spec(spec))
+            })
             .filter_map(|(index, spec)| spec.score.map(|score| (score, *index, spec.id.clone())))
             .filter(|(score, _, _)| *score >= 3)
             .collect::<Vec<_>>();
@@ -1246,20 +1269,27 @@ fn apply_quick_profile_selection(keyed_specs: &mut [(usize, TradeFilterSpec)]) {
     }
 }
 
-fn stat_score_and_reason(stat_id: &str, label: &str) -> (u8, String) {
+fn stat_score_and_reason(
+    stat_id: &str,
+    label: &str,
+    value: Option<f64>,
+    max_value: Option<f64>,
+) -> (u8, String) {
     let label_lower = label.to_ascii_lowercase();
 
     if stat_id == "pseudo.pseudo_total_elemental_resistance" {
-        return (
+        return scored_reason(
             8,
-            "Total elemental resistance is a high-signal pseudo stat.".to_string(),
+            pricing_roll_bonus(value, &[60.0, 90.0]),
+            "Total elemental resistance is a high-signal pseudo stat.",
         );
     }
 
     if label_lower.contains("rarity of items") {
-        return (
+        return scored_reason(
             8,
-            "Item rarity is a high-signal magic-find price stat.".to_string(),
+            pricing_roll_bonus(value, &[20.0, 35.0]),
+            "Item rarity is a high-signal magic-find price stat.",
         );
     }
 
@@ -1275,13 +1305,18 @@ fn stat_score_and_reason(stat_id: &str, label: &str) -> (u8, String) {
     }
 
     if label_lower.contains("maximum life") {
-        return (7, "Life is a high-signal price stat.".to_string());
+        return scored_reason(
+            7,
+            pricing_roll_bonus(value, &[90.0, 130.0]),
+            "Life is a high-signal price stat.",
+        );
     }
 
     if label_lower.contains("maximum energy shield") {
-        return (
+        return scored_reason(
             7,
-            "Flat Energy Shield is a high-signal defensive stat.".to_string(),
+            pricing_roll_bonus(value, &[80.0, 140.0]),
+            "Flat Energy Shield is a high-signal defensive stat.",
         );
     }
 
@@ -1320,16 +1355,68 @@ fn stat_score_and_reason(stat_id: &str, label: &str) -> (u8, String) {
     }
 
     if label_lower.contains("stun threshold") || label_lower.contains("poison duration") {
+        let direction = if max_value.is_some() {
+            " Lower-is-better range is represented as a max-value trade filter."
+        } else {
+            ""
+        };
         return (
             3,
-            "This mapped utility roll is searchable but lower priority for Quick Price."
-                .to_string(),
+            format!(
+                "This mapped utility roll is searchable but lower priority for Quick Price.{direction}"
+            ),
         );
     }
 
     (
         3,
         "Mapped modifier can be searched and is available for exact pricing.".to_string(),
+    )
+}
+
+fn scored_reason(base_score: u8, bonus: u8, reason: &str) -> (u8, String) {
+    let score = base_score.saturating_add(bonus).min(10);
+    if bonus > 0 {
+        (
+            score,
+            format!("{reason} high-roll bonus +{bonus} was applied."),
+        )
+    } else {
+        (score, reason.to_string())
+    }
+}
+
+fn pricing_roll_bonus(value: Option<f64>, thresholds: &[f64]) -> u8 {
+    let Some(value) = value else {
+        return 0;
+    };
+
+    thresholds
+        .iter()
+        .filter(|threshold| value >= **threshold)
+        .count()
+        .min(2) as u8
+}
+
+fn is_total_elemental_resistance_spec(spec: &TradeFilterSpec) -> bool {
+    matches!(
+        &spec.kind,
+        TradeFilterKind::Stat { stat_id, .. }
+            if stat_id == "pseudo.pseudo_total_elemental_resistance"
+    )
+}
+
+fn is_individual_elemental_resistance_spec(spec: &TradeFilterSpec) -> bool {
+    matches!(
+        &spec.kind,
+        TradeFilterKind::Stat { stat_id, .. }
+            if matches!(
+                stat_source(stat_id),
+                "explicit" | "crafted" | "fractured" | "rune" | "desecrated"
+            ) && matches!(
+                stat_base_id(stat_id),
+                "stat_3372524247" | "stat_4220027924" | "stat_1671376347"
+            )
     )
 }
 
@@ -1649,6 +1736,10 @@ fn stat_source(stat_id: &str) -> &str {
         .split_once('.')
         .map(|(source, _)| source)
         .unwrap_or_default()
+}
+
+fn stat_base_id(stat_id: &str) -> &str {
+    stat_id.split_once('.').map(|(_, id)| id).unwrap_or(stat_id)
 }
 
 fn stat_source_rank(source: &str, preferred_sources: &[&str]) -> usize {

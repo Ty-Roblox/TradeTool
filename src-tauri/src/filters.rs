@@ -275,7 +275,7 @@ fn identity_type_profile_ids(item: &CapturedItem, is_gem: bool) -> Vec<String> {
 }
 
 fn rarity_profile_ids(item: &CapturedItem, is_gem: bool) -> Vec<String> {
-    if is_gem || item.rarity.as_deref() == Some("Unique") {
+    if is_gem || matches!(item.rarity.as_deref(), Some("Magic" | "Unique")) {
         profile_ids(&["quick", "exact"])
     } else {
         profile_ids(&["exact"])
@@ -507,6 +507,87 @@ Item Level: 82
         assert!(crafting.filter_ids.contains(&"identity:type".to_string()));
         assert!(crafting.filter_ids.contains(&"misc:item_level".to_string()));
         assert!(!crafting.filter_ids.contains(&"identity:rarity".to_string()));
+    }
+
+    #[test]
+    fn quick_price_uses_total_resistance_pseudo_instead_of_duplicate_elemental_resists() {
+        let item = parse_item_text(
+            "Item Class: Rings
+Rarity: Rare
+Dragon Loop
+Ruby Ring
+--------
+Item Level: 82
+--------
++78 to maximum Life
+20% increased Rarity of Items found
++35% to Fire Resistance
++34% to Cold Resistance
++33% to Lightning Resistance",
+        )
+        .expect("ring should parse");
+        let groups = generate_filter_groups(&item);
+        let profiles = generate_price_check_profiles(&groups);
+        let quick = profiles
+            .iter()
+            .find(|profile| profile.id == "quick")
+            .expect("quick price profile");
+
+        assert!(quick
+            .filter_ids
+            .contains(&"stat:pseudo.pseudo_total_elemental_resistance".to_string()));
+        assert!(!quick
+            .filter_ids
+            .iter()
+            .any(|id| id.starts_with("stat:explicit.stat_3372524247")));
+        assert!(!quick
+            .filter_ids
+            .iter()
+            .any(|id| id.starts_with("stat:explicit.stat_4220027924")));
+        assert!(!quick
+            .filter_ids
+            .iter()
+            .any(|id| id.starts_with("stat:explicit.stat_1671376347")));
+    }
+
+    #[test]
+    fn magic_item_quick_price_keeps_rarity_and_exact_selected_affix_count() {
+        let item = parse_item_text(
+            "Item Class: Rings
+Rarity: Magic
+Glimmering Sapphire Ring
+Sapphire Ring
+--------
+Item Level: 70
+--------
+20% increased Rarity of Items found",
+        )
+        .expect("magic ring should parse");
+        let groups = generate_filter_groups(&item);
+        let profiles = generate_price_check_profiles(&groups);
+        let quick = profiles
+            .iter()
+            .find(|profile| profile.id == "quick")
+            .expect("quick price profile");
+
+        assert!(quick.filter_ids.contains(&"identity:rarity".to_string()));
+        assert!(quick
+            .filter_ids
+            .contains(&"misc:exact_selected_explicit_affixes".to_string()));
+        assert!(quick
+            .filter_ids
+            .contains(&"stat:explicit.stat_3917489142:0".to_string()));
+
+        let rarity_filter = groups
+            .iter()
+            .flat_map(|group| group.filters.iter())
+            .find(|filter| filter.id == "stat:explicit.stat_3917489142:0")
+            .expect("rarity stat filter");
+        assert_eq!(rarity_filter.score, Some(9));
+        assert!(rarity_filter
+            .selection_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("high-roll")));
     }
 
     #[test]
