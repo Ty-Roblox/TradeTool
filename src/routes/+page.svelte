@@ -774,6 +774,10 @@
     return segment.label ?? formatFilterTag(segment.tag);
   }
 
+  function hasPoeDescription(segment: RichTextSegment) {
+    return Boolean(segment.description);
+  }
+
   function formatFilterTag(value?: string) {
     if (!value) {
       return "";
@@ -1272,10 +1276,18 @@
                           <span class="mod-line">
                             {#each line as segment}
                               {#if segment.tag}
-                                <span
+                                <button
+                                  type="button"
                                   class={`poe-token ${poeTagClass(segment.tag)} ${poeCategoryClass(segment.category)}`}
-                                  title={poeSegmentTitle(segment)}
-                                  >{segment.text}</span
+                                  title={hasPoeDescription(segment) ? undefined : poeSegmentTitle(segment)}
+                                  aria-label={poeSegmentTitle(segment)}
+                                  >{segment.text}
+                                  {#if segment.description}
+                                    <span class="poe-keyword-tooltip" role="tooltip">
+                                      <strong>{segment.label ?? segment.text}</strong>
+                                      <span>{segment.description}</span>
+                                    </span>
+                                  {/if}</button
                                 >
                               {:else}
                                 {segment.text}
@@ -1292,10 +1304,18 @@
                           <span class="mod-line">
                             {#each line as segment}
                               {#if segment.tag}
-                                <span
+                                <button
+                                  type="button"
                                   class={`poe-token ${poeTagClass(segment.tag)} ${poeCategoryClass(segment.category)}`}
-                                  title={poeSegmentTitle(segment)}
-                                  >{segment.text}</span
+                                  title={hasPoeDescription(segment) ? undefined : poeSegmentTitle(segment)}
+                                  aria-label={poeSegmentTitle(segment)}
+                                  >{segment.text}
+                                  {#if segment.description}
+                                    <span class="poe-keyword-tooltip" role="tooltip">
+                                      <strong>{segment.label ?? segment.text}</strong>
+                                      <span>{segment.description}</span>
+                                    </span>
+                                  {/if}</button
                                 >
                               {:else}
                                 {segment.text}
@@ -2457,6 +2477,79 @@
   .poe-token {
     color: var(--gold);
     font-weight: 800;
+    position: relative;
+    display: inline;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    line-height: inherit;
+    background: transparent;
+    cursor: help;
+    outline: none;
+    text-decoration: underline;
+    text-decoration-color: rgba(225, 190, 109, 0.42);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+
+  .poe-token:focus-visible {
+    border-radius: 4px;
+    box-shadow: 0 0 0 2px rgba(225, 190, 109, 0.42);
+  }
+
+  .poe-keyword-tooltip {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 10px);
+    z-index: 30;
+    display: grid;
+    width: min(20rem, 76vw);
+    max-width: 20rem;
+    gap: 0.35rem;
+    padding: 0.7rem 0.8rem;
+    color: var(--text);
+    background: linear-gradient(180deg, rgba(22, 20, 28, 0.98), rgba(9, 12, 16, 0.98));
+    border: 1px solid rgba(225, 190, 109, 0.45);
+    border-radius: 6px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.35;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, 4px);
+    transition: opacity 120ms ease, transform 120ms ease;
+    white-space: normal;
+  }
+
+  .poe-keyword-tooltip::after {
+    position: absolute;
+    left: 50%;
+    bottom: -6px;
+    width: 10px;
+    height: 10px;
+    content: "";
+    background: rgba(9, 12, 16, 0.98);
+    border-right: 1px solid rgba(225, 190, 109, 0.45);
+    border-bottom: 1px solid rgba(225, 190, 109, 0.45);
+    transform: translateX(-50%) rotate(45deg);
+  }
+
+  .poe-keyword-tooltip strong {
+    color: var(--gold);
+    font-size: 0.76rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .poe-keyword-tooltip span {
+    color: var(--muted);
+  }
+
+  .poe-token:hover .poe-keyword-tooltip,
+  .poe-token:focus-visible .poe-keyword-tooltip {
+    opacity: 1;
+    transform: translate(-50%, 0);
   }
 
   .poe-category-damage {
