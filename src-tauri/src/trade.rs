@@ -224,6 +224,25 @@ pub fn build_trade_query_with_values(
         }
     }
 
+    if selected.contains("property:gem_level") {
+        if let Some(level) = gem_level(item) {
+            let (min, max) = filter_value_range(
+                "property:gem_level",
+                Some(level as f64),
+                None,
+                &value_overrides,
+            )?;
+            if let Some(min) = min {
+                query["query"]["filters"]["misc_filters"]["filters"]["gem_level"]["min"] =
+                    stat_value_json(min);
+            }
+            if let Some(max) = max {
+                query["query"]["filters"]["misc_filters"]["filters"]["gem_level"]["max"] =
+                    stat_value_json(max);
+            }
+        }
+    }
+
     if selected.contains("property:sockets") {
         if let Some(count) = item.sockets.as_deref().and_then(socket_count) {
             let (min, max) = filter_value_range(
@@ -360,6 +379,9 @@ fn supported_filter_ids(item: &CapturedItem) -> HashSet<String> {
     }
     if item.quality.is_some() {
         ids.insert("property:quality".to_string());
+    }
+    if gem_level(item).is_some() {
+        ids.insert("property:gem_level".to_string());
     }
     if item.sockets.as_deref().and_then(socket_count).is_some() {
         ids.insert("property:sockets".to_string());
@@ -847,6 +869,28 @@ pub fn socket_count(sockets: &str) -> Option<u32> {
     (count > 0).then_some(count as u32)
 }
 
+pub fn is_gem_item_class(item_class: Option<&str>) -> bool {
+    item_class.map(normalized_item_class).is_some_and(|class| {
+        matches!(
+            class.as_str(),
+            "skill gems" | "skill gem" | "active skill gems" | "support gems" | "support gem"
+        )
+    })
+}
+
+pub fn gem_level(item: &CapturedItem) -> Option<u32> {
+    if !is_gem_item_class(item.item_class.as_deref()) {
+        return None;
+    }
+
+    item.properties
+        .iter()
+        .find(|property| property.name.eq_ignore_ascii_case("Level"))
+        .and_then(|property| parse_first_number(&property.value))
+        .filter(|value| *value >= 0.0)
+        .map(|value| value as u32)
+}
+
 fn parse_first_number(value: &str) -> Option<f64> {
     let number = value
         .chars()
@@ -1267,7 +1311,7 @@ fn stat_filter_label(modifier_text: &str, _pattern_text: &str, value: Option<f64
 }
 
 fn category_for_item_class(item_class: &str) -> Option<&'static str> {
-    let normalized = item_class.to_ascii_lowercase();
+    let normalized = normalized_item_class(item_class);
     match normalized.as_str() {
         "boots" => Some("armour.boots"),
         "body armours" => Some("armour.chest"),
@@ -1277,8 +1321,18 @@ fn category_for_item_class(item_class: &str) -> Option<&'static str> {
         "amulets" => Some("accessory.amulet"),
         "rings" => Some("accessory.ring"),
         "belts" => Some("accessory.belt"),
+        "skill gems" | "skill gem" | "active skill gems" => Some("gem.activegem"),
+        "support gems" | "support gem" => Some("gem.supportgem"),
         _ => None,
     }
+}
+
+fn normalized_item_class(item_class: &str) -> String {
+    item_class
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
 }
 
 #[derive(Debug, Deserialize)]
@@ -1457,6 +1511,24 @@ Item Level: 82
 +2 to Level of all Melee Skills
 Has 2(1-3) Charm Slots";
 
+    const ACTIVE_SKILL_GEM: &str = "Item Class: Skill Gems
+Rarity: Gem
+Spark
+--------
+Level: 15
+Quality: +20%
+--------
+Item Level: 15";
+
+    const SUPPORT_GEM: &str = "Item Class: Support Gems
+Rarity: Gem
+Persistence
+--------
+Level: 2
+Quality: +10%
+--------
+Item Level: 2";
+
     fn empty_item() -> CapturedItem {
         CapturedItem {
             raw_text: String::new(),
@@ -1528,6 +1600,52 @@ Has 2(1-3) Charm Slots";
         assert_eq!(filters[0]["value"]["max"], 60);
         assert_eq!(filters[1]["value"]["min"], 124);
         assert_eq!(filters[1]["value"]["max"], 140);
+    }
+
+    #[test]
+    fn query_builder_supports_active_gem_base_rarity_category_level_and_quality() {
+        let item = parse_item_text(ACTIVE_SKILL_GEM).expect("skill gem should parse");
+        let query = build_trade_query(
+            &item,
+            &[
+                "category:gem.activegem".to_string(),
+                "identity:type".to_string(),
+                "identity:rarity".to_string(),
+                "property:gem_level".to_string(),
+                "property:quality".to_string(),
+            ],
+        )
+        .expect("query should build");
+
+        assert_eq!(query["query"]["type"], "Spark");
+        assert_eq!(
+            query["query"]["filters"]["type_filters"]["filters"]["category"]["option"],
+            "gem.activegem"
+        );
+        assert_eq!(
+            query["query"]["filters"]["type_filters"]["filters"]["rarity"]["option"],
+            "gem"
+        );
+        assert_eq!(
+            query["query"]["filters"]["misc_filters"]["filters"]["gem_level"]["min"],
+            15
+        );
+        assert_eq!(
+            query["query"]["filters"]["misc_filters"]["filters"]["quality"]["min"],
+            20
+        );
+    }
+
+    #[test]
+    fn query_builder_supports_support_gem_category() {
+        let item = parse_item_text(SUPPORT_GEM).expect("support gem should parse");
+        let query = build_trade_query(&item, &["category:gem.supportgem".to_string()])
+            .expect("query should build");
+
+        assert_eq!(
+            query["query"]["filters"]["type_filters"]["filters"]["category"]["option"],
+            "gem.supportgem"
+        );
     }
 
     #[test]

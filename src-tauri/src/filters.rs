@@ -1,11 +1,12 @@
 use crate::models::{AppDiagnostic, CapturedItem, FilterCandidate, FilterGroup};
 use crate::trade::{
-    mapped_explicit_modifier_indices, should_show_unsupported_modifier, socket_count,
-    trade_filter_specs,
+    gem_level, is_gem_item_class, mapped_explicit_modifier_indices,
+    should_show_unsupported_modifier, socket_count, trade_filter_specs,
 };
 
 pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
     let mut groups = Vec::new();
+    let is_gem = is_gem_item_class(item.item_class.as_deref());
 
     let trade_filters = trade_filter_specs(item)
         .into_iter()
@@ -33,7 +34,7 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
         identity.push(FilterCandidate {
             id: "identity:type".to_string(),
             label: format!("Base type: {base_type}"),
-            selected_by_default: false,
+            selected_by_default: is_gem,
             supported: true,
             unsupported_reason: None,
             default_min: None,
@@ -44,7 +45,7 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
         identity.push(FilterCandidate {
             id: "identity:rarity".to_string(),
             label: format!("Rarity: {rarity}"),
-            selected_by_default: false,
+            selected_by_default: is_gem,
             supported: true,
             unsupported_reason: None,
             default_min: None,
@@ -60,6 +61,17 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
     }
 
     let mut misc = Vec::new();
+    if let Some(level) = gem_level(item) {
+        misc.push(FilterCandidate {
+            id: "property:gem_level".to_string(),
+            label: format!("Gem level: {level}+"),
+            selected_by_default: true,
+            supported: true,
+            unsupported_reason: None,
+            default_min: Some(level as f64),
+            default_max: None,
+        });
+    }
     if let Some(item_level) = item.item_level {
         misc.push(FilterCandidate {
             id: "misc:item_level".to_string(),
@@ -75,7 +87,7 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
         misc.push(FilterCandidate {
             id: "property:quality".to_string(),
             label: format!("Quality: {quality}%+"),
-            selected_by_default: false,
+            selected_by_default: is_gem,
             supported: true,
             unsupported_reason: None,
             default_min: Some(quality as f64),
@@ -237,6 +249,15 @@ Item Level: 82
 +2 to Level of all Melee Skills
 Has 2(1-3) Charm Slots";
 
+    const ACTIVE_SKILL_GEM: &str = "Item Class: Skill Gems
+Rarity: Gem
+Spark
+--------
+Level: 15
+Quality: +20%
+--------
+Item Level: 15";
+
     #[test]
     fn creates_stable_filter_candidates_for_parsed_item() {
         let item = parse_item_text(RARE_BODY_ARMOUR).expect("item should parse");
@@ -263,6 +284,40 @@ Has 2(1-3) Charm Slots";
         assert!(life_filter.label.contains("maximum Life"));
         assert!(life_filter.supported);
         assert!(life_filter.selected_by_default);
+    }
+
+    #[test]
+    fn creates_gem_base_rarity_category_and_level_filters() {
+        let item = parse_item_text(ACTIVE_SKILL_GEM).expect("skill gem should parse");
+        let groups = generate_filter_groups(&item);
+        let filters = groups
+            .iter()
+            .flat_map(|group| group.filters.iter())
+            .collect::<Vec<_>>();
+
+        assert!(filters.iter().any(|filter| {
+            filter.id == "category:gem.activegem" && filter.supported && filter.selected_by_default
+        }));
+        assert!(filters
+            .iter()
+            .any(|filter| filter.id == "identity:type" && filter.selected_by_default));
+        assert!(filters
+            .iter()
+            .any(|filter| filter.id == "identity:rarity" && filter.selected_by_default));
+
+        let gem_level = filters
+            .iter()
+            .find(|filter| filter.id == "property:gem_level")
+            .expect("gem level filter");
+        assert_eq!(gem_level.default_min, Some(15.0));
+        assert!(gem_level.selected_by_default);
+
+        let quality = filters
+            .iter()
+            .find(|filter| filter.id == "property:quality")
+            .expect("quality filter");
+        assert_eq!(quality.default_min, Some(20.0));
+        assert!(quality.selected_by_default);
     }
 
     #[test]
