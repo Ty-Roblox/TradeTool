@@ -276,6 +276,11 @@ Item Level: 15";
         assert!(filters
             .iter()
             .any(|filter| filter.id == "property:quality" && !filter.selected_by_default));
+        assert!(filters.iter().any(|filter| {
+            filter.id == "misc:exact_selected_explicit_affixes"
+                && filter.supported
+                && !filter.selected_by_default
+        }));
 
         let life_filter = filters
             .iter()

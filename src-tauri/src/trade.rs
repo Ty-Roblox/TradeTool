@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 const TRADE_BASE_URL: &str = "https://www.pathofexile.com";
 const FETCH_PAGE_SIZE: usize = 10;
 const QUICK_JEWEL_FILTERS_JSON: &str = include_str!("../../src/lib/quick-jewel-filters.json");
+const EXACT_SELECTED_EXPLICIT_AFFIXES_FILTER_ID: &str = "misc:exact_selected_explicit_affixes";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,14 +43,18 @@ impl TradeFilterSpec {
     pub fn default_min(&self) -> Option<f64> {
         match &self.kind {
             TradeFilterKind::Stat { value, .. } => *value,
-            TradeFilterKind::Category(_) | TradeFilterKind::ItemType { .. } => None,
+            TradeFilterKind::Category(_)
+            | TradeFilterKind::ItemType { .. }
+            | TradeFilterKind::ExactSelectedExplicitAffixes => None,
         }
     }
 
     pub fn default_max(&self) -> Option<f64> {
         match &self.kind {
             TradeFilterKind::Stat { max_value, .. } => *max_value,
-            TradeFilterKind::Category(_) | TradeFilterKind::ItemType { .. } => None,
+            TradeFilterKind::Category(_)
+            | TradeFilterKind::ItemType { .. }
+            | TradeFilterKind::ExactSelectedExplicitAffixes => None,
         }
     }
 }
@@ -66,6 +71,7 @@ enum TradeFilterKind {
         value: Option<f64>,
         max_value: Option<f64>,
     },
+    ExactSelectedExplicitAffixes,
 }
 
 pub fn trade_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
@@ -81,7 +87,18 @@ pub fn trade_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
         });
     }
 
-    specs.extend(stat_filter_specs(item));
+    let stat_specs = stat_filter_specs(item);
+    if stat_specs.iter().any(is_explicit_stat_spec) {
+        specs.push(TradeFilterSpec {
+            id: EXACT_SELECTED_EXPLICIT_AFFIXES_FILTER_ID.to_string(),
+            label: "Only selected explicit affixes".to_string(),
+            selected_by_default: false,
+            source_modifier_index: None,
+            kind: TradeFilterKind::ExactSelectedExplicitAffixes,
+        });
+    }
+
+    specs.extend(stat_specs);
     specs
 }
 
@@ -149,7 +166,9 @@ pub fn build_trade_query_with_values(
 
                 stat_filters.push(filter);
             }
-            TradeFilterKind::Category(_) | TradeFilterKind::ItemType { .. } => {}
+            TradeFilterKind::Category(_)
+            | TradeFilterKind::ItemType { .. }
+            | TradeFilterKind::ExactSelectedExplicitAffixes => {}
         }
     }
 
@@ -281,7 +300,7 @@ pub fn build_trade_query_with_values(
                     query["query"]["filters"]["type_filters"]["disabled"] = json!(false);
                 }
             }
-            TradeFilterKind::Stat { .. } => {}
+            TradeFilterKind::Stat { .. } | TradeFilterKind::ExactSelectedExplicitAffixes => {}
         }
     }
 
@@ -411,6 +430,49 @@ pub fn selected_pseudo_stat_ids(
         .collect()
 }
 
+fn selected_exact_explicit_affix_count(
+    item: &CapturedItem,
+    selected_filter_ids: &[String],
+) -> Result<Option<usize>, String> {
+    let selected = selected_filter_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+
+    if !selected.contains(EXACT_SELECTED_EXPLICIT_AFFIXES_FILTER_ID) {
+        return Ok(None);
+    }
+
+    let count = all_trade_filter_specs(item)
+        .iter()
+        .filter(|spec| selected.contains(spec.id.as_str()))
+        .filter(|spec| is_explicit_stat_spec(spec))
+        .count();
+
+    if count == 0 {
+        return Err(
+            "Select at least one explicit modifier filter before using Only selected explicit affixes."
+                .to_string(),
+        );
+    }
+
+    Ok(Some(count))
+}
+
+fn apply_exact_selected_explicit_affix_filter(
+    listings: Vec<TradeListing>,
+    exact_count: Option<usize>,
+) -> Vec<TradeListing> {
+    let Some(exact_count) = exact_count else {
+        return listings;
+    };
+
+    listings
+        .into_iter()
+        .filter(|listing| listing.item.explicit_mods.len() == exact_count)
+        .collect()
+}
+
 pub fn build_fetch_url(
     search_id: &str,
     result_ids: &[String],
@@ -497,6 +559,8 @@ pub async fn search_trade(
 ) -> Result<TradeSearchResponse, String> {
     let league = sanitize_league(league)?;
     let query = build_trade_query_with_values(item, selected_filter_ids, selected_filter_values)?;
+    let exact_explicit_affix_count =
+        selected_exact_explicit_affix_count(item, selected_filter_ids)?;
     let api_url = format!("{TRADE_BASE_URL}/api/trade2/search/poe2/{league}");
 
     let response = reqwest::Client::new()
@@ -561,11 +625,20 @@ pub async fn search_trade(
                     .into_iter()
                     .filter(|listing| listing.can_teleport)
                     .collect();
+                let exact_buyout_len = listings.len();
+                listings = apply_exact_selected_explicit_affix_filter(
+                    listings,
+                    exact_explicit_affix_count,
+                );
 
                 if fetched_len > 0 && listings.is_empty() {
                     warning = Some(
-                        "The first fetched page had no exact-buyout listings available for TP."
-                            .to_string(),
+                        if exact_explicit_affix_count.is_some() && exact_buyout_len > 0 {
+                            "The first fetched page had exact-buyout listings, but none had only the selected explicit affixes.".to_string()
+                        } else {
+                            "The first fetched page had no exact-buyout listings available for TP."
+                                .to_string()
+                        },
                     );
                 }
             }
@@ -645,7 +718,9 @@ fn selected_stat_ids(item: &CapturedItem, selected_filter_ids: &[String]) -> Vec
         .filter(|spec| selected.contains(spec.id.as_str()))
         .filter_map(|spec| match spec.kind {
             TradeFilterKind::Stat { stat_id, .. } => Some(stat_id),
-            TradeFilterKind::Category(_) | TradeFilterKind::ItemType { .. } => None,
+            TradeFilterKind::Category(_)
+            | TradeFilterKind::ItemType { .. }
+            | TradeFilterKind::ExactSelectedExplicitAffixes => None,
         })
         .collect::<Vec<_>>();
 
@@ -1310,6 +1385,13 @@ fn stat_filter_label(modifier_text: &str, _pattern_text: &str, value: Option<f64
     }
 }
 
+fn is_explicit_stat_spec(spec: &TradeFilterSpec) -> bool {
+    matches!(
+        &spec.kind,
+        TradeFilterKind::Stat { stat_id, .. } if stat_id.starts_with("explicit.")
+    )
+}
+
 fn category_for_item_class(item_class: &str) -> Option<&'static str> {
     let normalized = normalized_item_class(item_class);
     match normalized.as_str() {
@@ -1411,7 +1493,9 @@ impl FetchMod {
 
 #[cfg(test)]
 mod tests {
-    use crate::models::{CapturedItem, FilterValueOverride};
+    use crate::models::{
+        CapturedItem, FilterValueOverride, TradeListing, TradeListingItem, TradePrice,
+    };
     use crate::parser::parse_item_text;
     use crate::trade::{
         build_fetch_url, build_trade_query, format_trade_api_error, is_blocked_or_rate_limited,
@@ -1544,6 +1628,34 @@ Item Level: 2";
         }
     }
 
+    fn trade_listing(id: &str, explicit_mods: &[&str]) -> TradeListing {
+        TradeListing {
+            id: id.to_string(),
+            indexed: None,
+            price: Some(TradePrice {
+                price_type: Some("~b/o".to_string()),
+                amount: 1.0,
+                currency: "exalted".to_string(),
+            }),
+            account_name: None,
+            can_teleport: true,
+            hideout_token: None,
+            item: TradeListingItem {
+                icon: None,
+                name: None,
+                type_line: None,
+                base_type: None,
+                rarity: None,
+                item_level: None,
+                explicit_mods: explicit_mods
+                    .iter()
+                    .map(|modifier| modifier.to_string())
+                    .collect(),
+                pseudo_mods: Vec::new(),
+            },
+        }
+    }
+
     #[test]
     fn query_builder_includes_only_selected_supported_filters() {
         let item = parse_item_text(RARE_BODY_ARMOUR).expect("item should parse");
@@ -1600,6 +1712,76 @@ Item Level: 2";
         assert_eq!(filters[0]["value"]["max"], 60);
         assert_eq!(filters[1]["value"]["min"], 124);
         assert_eq!(filters[1]["value"]["max"], 140);
+    }
+
+    #[test]
+    fn query_builder_accepts_exact_selected_explicit_affixes_filter() {
+        let item = parse_item_text(RARE_BOOTS).expect("boots should parse");
+        let query = build_trade_query(
+            &item,
+            &[
+                "identity:rarity".to_string(),
+                "stat:explicit.stat_4052037485:0".to_string(),
+                "stat:explicit.stat_4015621042:1".to_string(),
+                "misc:exact_selected_explicit_affixes".to_string(),
+            ],
+        )
+        .expect("query should build");
+
+        let exact_count = super::selected_exact_explicit_affix_count(
+            &item,
+            &[
+                "identity:rarity".to_string(),
+                "stat:explicit.stat_4052037485:0".to_string(),
+                "stat:explicit.stat_4015621042:1".to_string(),
+                "misc:exact_selected_explicit_affixes".to_string(),
+            ],
+        )
+        .expect("exact count should be understood");
+
+        assert_eq!(exact_count, Some(2));
+        assert_eq!(
+            query["query"]["filters"]["misc_filters"]["filters"]["explicit_count"],
+            serde_json::Value::Null
+        );
+    }
+
+    #[test]
+    fn exact_selected_explicit_affixes_requires_explicit_stats() {
+        let item = parse_item_text(RARE_BODY_ARMOUR).expect("body armour should parse");
+        let error = super::selected_exact_explicit_affix_count(
+            &item,
+            &["misc:exact_selected_explicit_affixes".to_string()],
+        )
+        .expect_err("exact affix filter should need at least one explicit stat");
+
+        assert!(error.contains("at least one explicit modifier"));
+    }
+
+    #[test]
+    fn exact_selected_explicit_affixes_filters_fetched_listings_by_mod_count() {
+        let one_mod = trade_listing("one-mod", &["12% increased maximum Energy Shield"]);
+        let two_mods = trade_listing(
+            "two-mods",
+            &[
+                "12% increased maximum Energy Shield",
+                "10% increased Critical Hit Chance",
+            ],
+        );
+        let no_mods = trade_listing("no-mods", &[]);
+
+        let listings = super::apply_exact_selected_explicit_affix_filter(
+            vec![one_mod, two_mods, no_mods],
+            Some(1),
+        );
+
+        assert_eq!(
+            listings
+                .iter()
+                .map(|listing| listing.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["one-mod"]
+        );
     }
 
     #[test]
