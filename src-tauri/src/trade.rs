@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use crate::models::{
-    AppDiagnostic, CapturedItem, FilterValueOverride, TradeListing, TradeListingItem, TradePrice,
-    TradeSearchResponse,
+    AppDiagnostic, CapturedItem, FilterValueOverride, ItemModifier, TradeListing, TradeListingItem,
+    TradePrice, TradeSearchResponse,
 };
 use crate::stat_patterns::STAT_PATTERNS;
 use serde::Deserialize;
@@ -36,6 +36,8 @@ pub struct TradeFilterSpec {
     pub label: String,
     pub selected_by_default: bool,
     pub source_modifier_index: Option<usize>,
+    pub source: Option<String>,
+    pub affix_side: Option<String>,
     pub score: Option<u8>,
     pub selection_reason: Option<String>,
     pub profile_ids: Vec<String>,
@@ -86,6 +88,8 @@ pub fn trade_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
             label: format!("Category: {}", item.item_class.as_deref().unwrap_or("Item")),
             selected_by_default: true,
             source_modifier_index: None,
+            source: None,
+            affix_side: None,
             score: None,
             selection_reason: Some(
                 "Category keeps the trade search on this item class.".to_string(),
@@ -95,6 +99,8 @@ pub fn trade_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
         });
     }
 
+    specs.extend(empty_affix_filter_specs(item));
+
     let stat_specs = stat_filter_specs(item);
     if stat_specs.iter().any(is_explicit_stat_spec) {
         specs.push(TradeFilterSpec {
@@ -102,6 +108,8 @@ pub fn trade_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
             label: "Only selected explicit affixes".to_string(),
             selected_by_default: false,
             source_modifier_index: None,
+            source: None,
+            affix_side: None,
             score: None,
             selection_reason: Some(
                 "Exact Match filters fetched listings to the selected explicit affix count."
@@ -114,6 +122,107 @@ pub fn trade_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
 
     specs.extend(stat_specs);
     specs
+}
+
+fn empty_affix_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
+    let Some((max_prefixes, max_suffixes)) = max_affix_slots(item) else {
+        return Vec::new();
+    };
+
+    let prefix_count = item
+        .explicit_mods
+        .iter()
+        .filter(|modifier| modifier.affix_side.as_deref() == Some("prefix"))
+        .count();
+    let suffix_count = item
+        .explicit_mods
+        .iter()
+        .filter(|modifier| modifier.affix_side.as_deref() == Some("suffix"))
+        .count();
+
+    if prefix_count == 0 && suffix_count == 0 {
+        return Vec::new();
+    }
+
+    let empty_prefixes = max_prefixes.saturating_sub(prefix_count);
+    let empty_suffixes = max_suffixes.saturating_sub(suffix_count);
+    let empty_affixes = empty_prefixes + empty_suffixes;
+    let mut specs = Vec::new();
+
+    if empty_prefixes > 0 {
+        specs.push(empty_affix_filter_spec(
+            "stat:pseudo.pseudo_number_of_empty_prefix_mods",
+            "pseudo.pseudo_number_of_empty_prefix_mods",
+            format!("Empty Prefix Modifiers: {empty_prefixes}+"),
+            empty_prefixes,
+            "Open prefixes matter when pricing crafting bases.",
+        ));
+    }
+
+    if empty_suffixes > 0 {
+        specs.push(empty_affix_filter_spec(
+            "stat:pseudo.pseudo_number_of_empty_suffix_mods",
+            "pseudo.pseudo_number_of_empty_suffix_mods",
+            format!("Empty Suffix Modifiers: {empty_suffixes}+"),
+            empty_suffixes,
+            "Open suffixes matter when pricing crafting bases.",
+        ));
+    }
+
+    if empty_affixes > 0 {
+        specs.push(empty_affix_filter_spec(
+            "stat:pseudo.pseudo_number_of_empty_affix_mods",
+            "pseudo.pseudo_number_of_empty_affix_mods",
+            format!("Empty Modifiers: {empty_affixes}+"),
+            empty_affixes,
+            "Total open affixes are useful for broad crafting-base searches.",
+        ));
+    }
+
+    specs
+}
+
+fn max_affix_slots(item: &CapturedItem) -> Option<(usize, usize)> {
+    match item.rarity.as_deref() {
+        Some("Rare") => Some((3, 3)),
+        Some("Magic") => Some((1, 1)),
+        _ => None,
+    }
+}
+
+fn empty_affix_filter_spec(
+    id: &str,
+    stat_id: &str,
+    label: String,
+    value: usize,
+    reason: &str,
+) -> TradeFilterSpec {
+    TradeFilterSpec {
+        id: id.to_string(),
+        label,
+        selected_by_default: false,
+        source_modifier_index: None,
+        source: Some("pseudo".to_string()),
+        affix_side: empty_affix_side(stat_id).map(ToOwned::to_owned),
+        score: Some(6),
+        selection_reason: Some(reason.to_string()),
+        profile_ids: profile_ids(&["crafting-base"]),
+        kind: TradeFilterKind::Stat {
+            stat_id: stat_id.to_string(),
+            value: Some(value as f64),
+            max_value: None,
+        },
+    }
+}
+
+fn empty_affix_side(stat_id: &str) -> Option<&'static str> {
+    if stat_id.contains("empty_prefix") {
+        Some("prefix")
+    } else if stat_id.contains("empty_suffix") {
+        Some("suffix")
+    } else {
+        None
+    }
 }
 
 pub fn mapped_explicit_modifier_indices(item: &CapturedItem) -> HashSet<usize> {
@@ -825,6 +934,8 @@ fn quick_filter_specs() -> Vec<TradeFilterSpec> {
             label: format!("Jewel: {}", jewel.label),
             selected_by_default: false,
             source_modifier_index: None,
+            source: None,
+            affix_side: None,
             score: None,
             selection_reason: None,
             profile_ids: Vec::new(),
@@ -840,6 +951,8 @@ fn quick_filter_specs() -> Vec<TradeFilterSpec> {
                 label: format!("{}: {}", jewel.label, stat.label),
                 selected_by_default: false,
                 source_modifier_index: None,
+                source: None,
+                affix_side: None,
                 score: None,
                 selection_reason: None,
                 profile_ids: Vec::new(),
@@ -877,19 +990,19 @@ fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
         if let Some((stat_id, label, value)) = mapped_charm_slots(&text) {
             keyed_specs.push((
                 modifier.index,
-                stat_filter_spec(stat_id, label, modifier.index, Some(value), None),
+                stat_filter_spec(stat_id, label, modifier, Some(value), None),
             ));
         } else if let Some((stat_id, label, max_value)) = mapped_reduced_poison_duration(&text) {
             keyed_specs.push((
                 modifier.index,
-                stat_filter_spec(stat_id, label, modifier.index, None, Some(max_value)),
+                stat_filter_spec(stat_id, label, modifier, None, Some(max_value)),
             ));
         } else if let Some((stat_id, label, value)) =
             mapped_official_stat(&text, item.item_class.as_deref())
         {
             keyed_specs.push((
                 modifier.index,
-                stat_filter_spec(stat_id, label, modifier.index, value, None),
+                stat_filter_spec(stat_id, label, modifier, value, None),
             ));
         }
 
@@ -912,6 +1025,8 @@ fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
                 ),
                 "stat:pseudo.pseudo_total_elemental_resistance".to_string(),
                 first_resistance_index,
+                Some("pseudo".to_string()),
+                None,
                 Some(elemental_resistance_total),
                 None,
             ),
@@ -926,15 +1041,17 @@ fn stat_filter_specs(item: &CapturedItem) -> Vec<TradeFilterSpec> {
 fn stat_filter_spec(
     stat_id: String,
     label: String,
-    modifier_index: usize,
+    modifier: &ItemModifier,
     value: Option<f64>,
     max_value: Option<f64>,
 ) -> TradeFilterSpec {
     stat_filter_spec_with_source(
         stat_id.clone(),
         label,
-        format!("stat:{stat_id}:{modifier_index}"),
-        Some(modifier_index),
+        format!("stat:{stat_id}:{}", modifier.index),
+        Some(modifier.index),
+        modifier.source.clone(),
+        modifier.affix_side.clone(),
         value,
         max_value,
     )
@@ -945,6 +1062,8 @@ fn stat_filter_spec_with_source(
     label: String,
     id: String,
     source_modifier_index: Option<usize>,
+    source: Option<String>,
+    affix_side: Option<String>,
     value: Option<f64>,
     max_value: Option<f64>,
 ) -> TradeFilterSpec {
@@ -955,6 +1074,8 @@ fn stat_filter_spec_with_source(
         label,
         selected_by_default: false,
         source_modifier_index,
+        source,
+        affix_side,
         score: Some(score),
         selection_reason: Some(selection_reason),
         profile_ids: profile_ids(&["exact"]),
@@ -1751,6 +1872,20 @@ Item Level: 82
 +2 to Level of all Melee Skills
 Has 2(1-3) Charm Slots";
 
+    const RARE_WITH_AFFIX_MARKERS: &str = "Item Class: Body Armours
+Rarity: Rare
+Dread Shelter
+Expert Hexer's Robe
+--------
+Item Level: 72
+--------
+{ Prefix Modifier }
++78 to maximum Life
+{ Suffix Modifier }
++34% to Fire Resistance
+{ Suffix Modifier }
++29% to Lightning Resistance";
+
     const ACTIVE_SKILL_GEM: &str = "Item Class: Skill Gems
 Rarity: Gem
 Spark
@@ -2093,10 +2228,10 @@ Item Level: 2";
             &[
                 "category:armour.helmet".to_string(),
                 "stat:rune.stat_1998951374:0".to_string(),
-                "stat:explicit.stat_3984865854:2".to_string(),
-                "stat:explicit.stat_4010677958:4".to_string(),
-                "stat:explicit.stat_1379411836:6".to_string(),
-                "stat:explicit.stat_1067622524:8".to_string(),
+                "stat:explicit.stat_3984865854:1".to_string(),
+                "stat:explicit.stat_4010677958:2".to_string(),
+                "stat:explicit.stat_1379411836:3".to_string(),
+                "stat:explicit.stat_1067622524:4".to_string(),
             ],
         )
         .expect("query should build");
@@ -2138,11 +2273,11 @@ Item Level: 2";
         let query = build_trade_query(
             &item,
             &[
-                "stat:explicit.stat_2954116742|11184:1".to_string(),
-                "stat:explicit.stat_124859000:3".to_string(),
-                "stat:explicit.stat_3299347043:4".to_string(),
-                "stat:explicit.stat_2901986750:5".to_string(),
-                "stat:explicit.stat_9187492:6".to_string(),
+                "stat:explicit.stat_2954116742|11184:0".to_string(),
+                "stat:explicit.stat_124859000:1".to_string(),
+                "stat:explicit.stat_3299347043:2".to_string(),
+                "stat:explicit.stat_2901986750:3".to_string(),
+                "stat:explicit.stat_9187492:4".to_string(),
             ],
         )
         .expect("query should build");
@@ -2253,6 +2388,46 @@ Item Level: 2";
         let filter = &query["query"]["stats"][0]["filters"][0];
         assert_eq!(filter["id"], "explicit.stat_1416292992");
         assert_eq!(filter["value"]["min"], 2);
+    }
+
+    #[test]
+    fn query_builder_maps_empty_affix_pseudo_filters() {
+        let item = parse_item_text(RARE_WITH_AFFIX_MARKERS).expect("rare item should parse");
+        let query = build_trade_query(
+            &item,
+            &[
+                "stat:pseudo.pseudo_number_of_empty_prefix_mods".to_string(),
+                "stat:pseudo.pseudo_number_of_empty_suffix_mods".to_string(),
+            ],
+        )
+        .expect("query should build");
+
+        let filters = query["query"]["stats"][0]["filters"]
+            .as_array()
+            .expect("stat filters");
+        let observed = filters
+            .iter()
+            .map(|filter| {
+                (
+                    filter["id"].as_str().expect("id"),
+                    filter["value"]["min"].as_i64().expect("min"),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            observed,
+            vec![
+                ("pseudo.pseudo_number_of_empty_prefix_mods", 2),
+                ("pseudo.pseudo_number_of_empty_suffix_mods", 1),
+            ]
+        );
+
+        let pseudos = super::selected_pseudo_stat_ids(
+            &item,
+            &["stat:pseudo.pseudo_number_of_empty_suffix_mods".to_string()],
+        );
+        assert_eq!(pseudos, vec!["pseudo.pseudo_number_of_empty_suffix_mods"]);
     }
 
     #[test]

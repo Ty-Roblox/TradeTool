@@ -14,7 +14,9 @@ pub fn parse_item_text(raw_text: &str) -> Result<CapturedItem, String> {
     }
 
     let sections = split_sections(&lines);
-    let header = sections.first().ok_or_else(|| "Item text is missing a header.".to_string())?;
+    let header = sections
+        .first()
+        .ok_or_else(|| "Item text is missing a header.".to_string())?;
     let item_class = header_value(header, "Item Class:");
     let rarity = header_value(header, "Rarity:");
     let identity_lines = identity_lines(header);
@@ -32,6 +34,7 @@ pub fn parse_item_text(raw_text: &str) -> Result<CapturedItem, String> {
     let mut properties = Vec::new();
     let mut explicit_mods = Vec::new();
     let mut collect_mods = false;
+    let mut current_modifier_marker: Option<ModifierMarker> = None;
 
     for section in sections.iter().skip(1) {
         if section.iter().any(|line| line.starts_with("Item Level:")) {
@@ -45,10 +48,24 @@ pub fn parse_item_text(raw_text: &str) -> Result<CapturedItem, String> {
         }
 
         if collect_mods {
-            for line in section.iter().filter(|line| is_explicit_modifier_line(line)) {
+            for line in section {
+                if let Some(marker) = parse_modifier_marker(line) {
+                    current_modifier_marker = Some(marker);
+                    continue;
+                }
+
+                if !is_explicit_modifier_line(line) {
+                    continue;
+                }
+
+                let marker = current_modifier_marker
+                    .clone()
+                    .or_else(|| modifier_marker_from_text(line));
                 explicit_mods.push(ItemModifier {
                     index: explicit_mods.len(),
                     text: line.clone(),
+                    source: marker.as_ref().and_then(|marker| marker.source.clone()),
+                    affix_side: marker.as_ref().and_then(|marker| marker.affix_side.clone()),
                 });
             }
             continue;
@@ -110,9 +127,11 @@ fn split_sections(lines: &[String]) -> Vec<Vec<String>> {
 }
 
 fn header_value(header: &[String], prefix: &str) -> Option<String> {
-    header
-        .iter()
-        .find_map(|line| line.strip_prefix(prefix).map(str::trim).map(ToOwned::to_owned))
+    header.iter().find_map(|line| {
+        line.strip_prefix(prefix)
+            .map(str::trim)
+            .map(ToOwned::to_owned)
+    })
 }
 
 fn identity_lines(header: &[String]) -> Vec<String> {
@@ -172,10 +191,88 @@ fn parse_first_i32(value: &str) -> Option<i32> {
 
 fn is_explicit_modifier_line(line: &str) -> bool {
     !line.contains(':')
+        && parse_modifier_marker(line).is_none()
         && !matches!(
             line,
             "Corrupted" | "Mirrored" | "Unidentified" | "Unmodifiable"
         )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ModifierMarker {
+    source: Option<String>,
+    affix_side: Option<String>,
+}
+
+fn parse_modifier_marker(line: &str) -> Option<ModifierMarker> {
+    let trimmed = line.trim();
+    let inner = trimmed.strip_prefix('{')?.strip_suffix('}')?.trim();
+
+    let lower = inner.to_ascii_lowercase();
+    if inner.is_empty() {
+        return None;
+    }
+
+    Some(ModifierMarker {
+        source: Some(marker_source(&lower).to_string()),
+        affix_side: marker_affix_side(&lower).map(ToOwned::to_owned),
+    })
+}
+
+fn modifier_marker_from_text(line: &str) -> Option<ModifierMarker> {
+    let lower = line.to_ascii_lowercase();
+    let source = if lower.contains("(crafted)") {
+        Some("crafted")
+    } else if lower.contains("(fractured)") {
+        Some("fractured")
+    } else if lower.contains("(rune)") {
+        Some("rune")
+    } else if lower.contains("(implicit)") {
+        Some("implicit")
+    } else if lower.contains("(enchant)") {
+        Some("enchant")
+    } else if lower.contains("(desecrated)") {
+        Some("desecrated")
+    } else if lower.contains("(sanctum)") {
+        Some("sanctum")
+    } else {
+        None
+    };
+
+    source.map(|source| ModifierMarker {
+        source: Some(source.to_string()),
+        affix_side: None,
+    })
+}
+
+fn marker_source(lower_marker: &str) -> &'static str {
+    if lower_marker.contains("crafted") {
+        "crafted"
+    } else if lower_marker.contains("fractured") {
+        "fractured"
+    } else if lower_marker.contains("rune") {
+        "rune"
+    } else if lower_marker.contains("implicit") {
+        "implicit"
+    } else if lower_marker.contains("enchant") {
+        "enchant"
+    } else if lower_marker.contains("desecrated") {
+        "desecrated"
+    } else if lower_marker.contains("sanctum") {
+        "sanctum"
+    } else {
+        "explicit"
+    }
+}
+
+fn marker_affix_side(lower_marker: &str) -> Option<&'static str> {
+    if lower_marker.contains("prefix") {
+        Some("prefix")
+    } else if lower_marker.contains("suffix") {
+        Some("suffix")
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -215,6 +312,20 @@ Item Level: 84
 Allies in your Presence have 10% increased Attack Speed (rune)
 50(50-75)% increased Spirit";
 
+    const RARE_WITH_AFFIX_MARKERS: &str = "Item Class: Body Armours
+Rarity: Rare
+Dread Shelter
+Expert Hexer's Robe
+--------
+Item Level: 72
+--------
+{ Prefix Modifier }
++78 to maximum Life
+{ Suffix Modifier }
++34% to Fire Resistance
+{ Crafted Suffix Modifier }
++29% to Lightning Resistance (crafted)";
+
     #[test]
     fn parses_rare_gear_identity_properties_and_explicit_mods() {
         let item = parse_item_text(RARE_BODY_ARMOUR).expect("rare body armour should parse");
@@ -226,8 +337,14 @@ Allies in your Presence have 10% increased Attack Speed (rune)
         assert_eq!(item.item_level, Some(72));
         assert_eq!(item.quality, Some(20));
         assert_eq!(item.sockets.as_deref(), Some("S S"));
-        assert!(item.explicit_mods.iter().any(|modifier| modifier.text == "+78 to maximum Life"));
-        assert!(item.explicit_mods.iter().any(|modifier| modifier.text == "+34% to Fire Resistance"));
+        assert!(item
+            .explicit_mods
+            .iter()
+            .any(|modifier| modifier.text == "+78 to maximum Life"));
+        assert!(item
+            .explicit_mods
+            .iter()
+            .any(|modifier| modifier.text == "+34% to Fire Resistance"));
     }
 
     #[test]
@@ -237,6 +354,24 @@ Allies in your Presence have 10% increased Attack Speed (rune)
         assert_eq!(item.rarity.as_deref(), Some("Unique"));
         assert_eq!(item.item_name.as_deref(), Some("Crown of the Pale King"));
         assert_eq!(item.base_type.as_deref(), Some("Cultist Crown"));
+    }
+
+    #[test]
+    fn parses_modifier_markers_into_affix_metadata_without_marker_mods() {
+        let item = parse_item_text(RARE_WITH_AFFIX_MARKERS).expect("rare item should parse");
+
+        assert_eq!(item.explicit_mods.len(), 3);
+        assert_eq!(item.explicit_mods[0].text, "+78 to maximum Life");
+        assert_eq!(item.explicit_mods[0].source.as_deref(), Some("explicit"));
+        assert_eq!(item.explicit_mods[0].affix_side.as_deref(), Some("prefix"));
+        assert_eq!(item.explicit_mods[1].source.as_deref(), Some("explicit"));
+        assert_eq!(item.explicit_mods[1].affix_side.as_deref(), Some("suffix"));
+        assert_eq!(item.explicit_mods[2].source.as_deref(), Some("crafted"));
+        assert_eq!(item.explicit_mods[2].affix_side.as_deref(), Some("suffix"));
+        assert!(!item
+            .explicit_mods
+            .iter()
+            .any(|modifier| modifier.text.contains("Modifier }")));
     }
 
     #[test]

@@ -18,6 +18,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
             selected_by_default: spec.selected_by_default,
             supported: true,
             unsupported_reason: None,
+            source: spec.source,
+            affix_side: spec.affix_side,
             score: spec.score,
             selection_reason: spec.selection_reason,
             profile_ids: spec.profile_ids,
@@ -41,6 +43,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
             selected_by_default: profile_ids.iter().any(|profile| profile == "quick"),
             supported: true,
             unsupported_reason: None,
+            source: None,
+            affix_side: None,
             score: None,
             selection_reason: Some("Identity is useful for exact and base searches.".to_string()),
             profile_ids,
@@ -56,6 +60,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
             selected_by_default: profile_ids.iter().any(|profile| profile == "quick"),
             supported: true,
             unsupported_reason: None,
+            source: None,
+            affix_side: None,
             score: None,
             selection_reason: Some(
                 "Rarity keeps exact searches on the same item tier.".to_string(),
@@ -81,6 +87,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
             selected_by_default: true,
             supported: true,
             unsupported_reason: None,
+            source: None,
+            affix_side: None,
             score: Some(8),
             selection_reason: Some("Gem level is usually the main gem price driver.".to_string()),
             profile_ids: profile_ids(&["quick", "exact"]),
@@ -95,6 +103,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
             selected_by_default: false,
             supported: true,
             unsupported_reason: None,
+            source: None,
+            affix_side: None,
             score: None,
             selection_reason: Some(
                 "Item level is most useful for crafting base searches.".to_string(),
@@ -116,6 +126,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
             selected_by_default: profile_ids.iter().any(|profile| profile == "quick"),
             supported: true,
             unsupported_reason: None,
+            source: None,
+            affix_side: None,
             score: is_gem.then_some(5),
             selection_reason: Some(if is_gem {
                 "Gem quality can materially change gem value.".to_string()
@@ -135,6 +147,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
                 selected_by_default: false,
                 supported: true,
                 unsupported_reason: None,
+                source: None,
+                affix_side: None,
                 score: None,
                 selection_reason: Some(
                     "Sockets are useful for crafting base and exact searches.".to_string(),
@@ -151,6 +165,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
                 unsupported_reason: Some(
                     "Socket filters need POE2-specific trade mapping.".to_string(),
                 ),
+                source: None,
+                affix_side: None,
                 score: None,
                 selection_reason: None,
                 profile_ids: Vec::new(),
@@ -182,6 +198,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
                 unsupported_reason: Some(
                     "Modifier stat ID mapping will expand from real POE2 fixtures.".to_string(),
                 ),
+                source: modifier.source.clone(),
+                affix_side: modifier.affix_side.clone(),
                 score: None,
                 selection_reason: None,
                 profile_ids: Vec::new(),
@@ -359,6 +377,20 @@ Item Level: 82
 +2 to Level of all Melee Skills
 Has 2(1-3) Charm Slots";
 
+    const RARE_WITH_AFFIX_MARKERS: &str = "Item Class: Body Armours
+Rarity: Rare
+Dread Shelter
+Expert Hexer's Robe
+--------
+Item Level: 72
+--------
+{ Prefix Modifier }
++78 to maximum Life
+{ Suffix Modifier }
++34% to Fire Resistance
+{ Suffix Modifier }
++29% to Lightning Resistance";
+
     const ACTIVE_SKILL_GEM: &str = "Item Class: Skill Gems
 Rarity: Gem
 Spark
@@ -478,6 +510,82 @@ Item Level: 82
     }
 
     #[test]
+    fn creates_empty_affix_pseudo_filters_from_prefix_suffix_markers() {
+        let item = parse_item_text(RARE_WITH_AFFIX_MARKERS).expect("rare item should parse");
+        let groups = generate_filter_groups(&item);
+        let filters = groups
+            .iter()
+            .flat_map(|group| group.filters.iter())
+            .collect::<Vec<_>>();
+
+        let empty_prefix = filters
+            .iter()
+            .find(|filter| filter.id == "stat:pseudo.pseudo_number_of_empty_prefix_mods")
+            .expect("empty prefix filter");
+        assert_eq!(empty_prefix.default_min, Some(2.0));
+        assert_eq!(
+            empty_prefix.selection_reason.as_deref(),
+            Some("Open prefixes matter when pricing crafting bases.")
+        );
+        assert!(empty_prefix
+            .profile_ids
+            .iter()
+            .any(|profile| profile == "crafting-base"));
+        assert!(!empty_prefix.selected_by_default);
+
+        let empty_suffix = filters
+            .iter()
+            .find(|filter| filter.id == "stat:pseudo.pseudo_number_of_empty_suffix_mods")
+            .expect("empty suffix filter");
+        assert_eq!(empty_suffix.default_min, Some(1.0));
+
+        let empty_affix = filters
+            .iter()
+            .find(|filter| filter.id == "stat:pseudo.pseudo_number_of_empty_affix_mods")
+            .expect("empty affix filter");
+        assert_eq!(empty_affix.default_min, Some(3.0));
+
+        let profiles = generate_price_check_profiles(&groups);
+        let crafting = profiles
+            .iter()
+            .find(|profile| profile.id == "crafting-base")
+            .expect("crafting profile");
+        assert!(crafting
+            .filter_ids
+            .contains(&"stat:pseudo.pseudo_number_of_empty_prefix_mods".to_string()));
+        assert!(crafting
+            .filter_ids
+            .contains(&"stat:pseudo.pseudo_number_of_empty_suffix_mods".to_string()));
+        assert!(crafting
+            .filter_ids
+            .contains(&"stat:pseudo.pseudo_number_of_empty_affix_mods".to_string()));
+    }
+
+    #[test]
+    fn carries_modifier_source_and_affix_side_to_filter_candidates() {
+        let item = parse_item_text(RARE_WITH_AFFIX_MARKERS).expect("rare item should parse");
+        let groups = generate_filter_groups(&item);
+        let filters = groups
+            .iter()
+            .flat_map(|group| group.filters.iter())
+            .collect::<Vec<_>>();
+
+        let life = filters
+            .iter()
+            .find(|filter| filter.id == "stat:explicit.stat_3299347043:0")
+            .expect("life filter");
+        assert_eq!(life.source.as_deref(), Some("explicit"));
+        assert_eq!(life.affix_side.as_deref(), Some("prefix"));
+
+        let empty_prefix = filters
+            .iter()
+            .find(|filter| filter.id == "stat:pseudo.pseudo_number_of_empty_prefix_mods")
+            .expect("empty prefix filter");
+        assert_eq!(empty_prefix.source.as_deref(), Some("pseudo"));
+        assert_eq!(empty_prefix.affix_side.as_deref(), Some("prefix"));
+    }
+
+    #[test]
     fn creates_gem_base_rarity_category_and_level_filters() {
         let item = parse_item_text(ACTIVE_SKILL_GEM).expect("skill gem should parse");
         let groups = generate_filter_groups(&item);
@@ -527,13 +635,13 @@ Item Level: 82
 
         assert!(filters
             .iter()
-            .any(|filter| filter.id == "stat:explicit.stat_124859000:3"));
+            .any(|filter| filter.id == "stat:explicit.stat_124859000:1"));
         assert!(filters
             .iter()
-            .any(|filter| filter.id == "stat:explicit.stat_3299347043:4"));
+            .any(|filter| filter.id == "stat:explicit.stat_3299347043:2"));
         assert!(filters
             .iter()
-            .any(|filter| filter.id == "stat:explicit.stat_2954116742|11184:1"));
+            .any(|filter| filter.id == "stat:explicit.stat_2954116742|11184:0"));
         assert!(!labels.contains(&"{ Enhancement }"));
         assert!(!labels.contains(&"{ Implicit Modifier }"));
         assert!(!labels.iter().any(|label| label.contains("wistful cry")));

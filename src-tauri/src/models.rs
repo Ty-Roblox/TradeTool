@@ -44,6 +44,10 @@ pub struct ItemProperty {
 pub struct ItemModifier {
     pub index: usize,
     pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub affix_side: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -62,6 +66,10 @@ pub struct FilterCandidate {
     pub selected_by_default: bool,
     pub supported: bool,
     pub unsupported_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub affix_side: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]

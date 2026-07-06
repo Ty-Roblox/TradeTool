@@ -35,6 +35,8 @@
     selectedByDefault: boolean;
     supported: boolean;
     unsupportedReason?: string;
+    source?: string;
+    affixSide?: string;
     score?: number;
     selectionReason?: string;
     profileIds: string[];
@@ -722,6 +724,18 @@
 
     return parts.join(" / ");
   }
+
+  function formatFilterTag(value?: string) {
+    if (!value) {
+      return "";
+    }
+
+    return value
+      .split(/[\s_-]+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  }
 </script>
 
 <svelte:head>
@@ -1024,8 +1038,14 @@
                   />
                   <div class="filter-content">
                     <span>{filter.label}</span>
-                    {#if filter.score || filter.selectionReason}
+                    {#if filter.source || filter.affixSide || filter.score || filter.selectionReason}
                       <div class="filter-meta">
+                        {#if filter.affixSide}
+                          <strong class="affix-badge">{formatFilterTag(filter.affixSide)}</strong>
+                        {/if}
+                        {#if filter.source}
+                          <strong class="source-badge">{formatFilterTag(filter.source)}</strong>
+                        {/if}
                         {#if filter.score}
                           <strong>Score {filter.score}</strong>
                         {/if}
@@ -2036,6 +2056,18 @@
     color: #8ee6d4;
     background: rgba(45, 159, 137, 0.12);
     font-size: 0.7rem;
+  }
+
+  .filter-meta strong.affix-badge {
+    border-color: rgba(214, 179, 106, 0.38);
+    color: #f2d89a;
+    background: rgba(214, 179, 106, 0.12);
+  }
+
+  .filter-meta strong.source-badge {
+    border-color: rgba(109, 183, 255, 0.34);
+    color: #9ccfff;
+    background: rgba(109, 183, 255, 0.1);
   }
 
   .filter-meta small {
