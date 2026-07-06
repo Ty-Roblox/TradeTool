@@ -1,5 +1,6 @@
 mod capture;
 mod filters;
+mod firefox_bridge;
 mod models;
 mod parser;
 mod stat_patterns;
@@ -24,12 +25,17 @@ fn capture_item_now(app: tauri::AppHandle) -> Result<models::CaptureResponse, St
 async fn search_trade(
     request: models::SearchTradeRequest,
 ) -> Result<models::TradeSearchResponse, String> {
+    firefox_bridge::clear_listing_tokens();
+
     let item = match request.raw_text.as_deref().map(str::trim) {
         Some(raw_text) if !raw_text.is_empty() => parser::parse_item_text(raw_text)?,
         _ => models::CapturedItem::empty(),
     };
 
-    trade::search_trade(&request.league, &item, &request.selected_filter_ids).await
+    let response =
+        trade::search_trade(&request.league, &item, &request.selected_filter_ids).await?;
+    firefox_bridge::replace_listing_tokens(&response.listings);
+    Ok(response)
 }
 
 #[tauri::command]
@@ -39,6 +45,20 @@ fn open_trade_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|error| format!("Opening the trade result page failed: {error}"))
+}
+
+#[tauri::command]
+fn firefox_bridge_status() -> firefox_bridge::FirefoxBridgeStatus {
+    firefox_bridge::status()
+}
+
+#[tauri::command]
+async fn teleport_to_hideout(
+    listing_id: String,
+) -> Result<firefox_bridge::TeleportToHideoutResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || firefox_bridge::teleport_to_hideout(listing_id))
+        .await
+        .map_err(|error| format!("Teleport task failed: {error}"))?
 }
 
 fn build_capture_response(raw_text: String) -> Result<models::CaptureResponse, String> {
@@ -61,6 +81,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            firefox_bridge::start();
+
             #[cfg(desktop)]
             {
                 use tauri_plugin_global_shortcut::{
@@ -73,10 +95,14 @@ pub fn run() {
                 app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::new()
                         .with_handler(move |app, shortcut, event| {
-                            if shortcut == &handler_shortcut && event.state() == ShortcutState::Pressed {
+                            if shortcut == &handler_shortcut
+                                && event.state() == ShortcutState::Pressed
+                            {
                                 let app = app.clone();
                                 tauri::async_runtime::spawn(async move {
-                                    match capture::capture_item_text().and_then(build_capture_response) {
+                                    match capture::capture_item_text()
+                                        .and_then(build_capture_response)
+                                    {
                                         Ok(response) => {
                                             let _ = app.emit("item_captured", response);
                                         }
@@ -98,7 +124,9 @@ pub fn run() {
             capture_item_now,
             parse_item_text,
             search_trade,
-            open_trade_url
+            open_trade_url,
+            firefox_bridge_status,
+            teleport_to_hideout
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

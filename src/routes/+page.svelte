@@ -73,7 +73,22 @@
     indexed?: string;
     price?: TradePrice;
     accountName?: string;
+    canTeleport: boolean;
     item: TradeListingItem;
+  };
+
+  type FirefoxBridgeStatus = {
+    enabled: boolean;
+    port?: number;
+    pairingKey: string;
+    connected: boolean;
+    pending: boolean;
+    lastMessage?: string;
+  };
+
+  type TeleportToHideoutResponse = {
+    success: boolean;
+    message: string;
   };
 
   type TradePrice = {
@@ -122,6 +137,10 @@
   let searchStatus = $state("");
   let searchError = $state("");
   let searching = $state(false);
+  let bridgeStatus = $state<FirefoxBridgeStatus | null>(null);
+  let bridgeError = $state("");
+  let teleportingListingId = $state("");
+  let teleportStatuses = $state<Record<string, string>>({});
   let updateStatus = $state("Checking for updates...");
   let updateError = $state("");
 
@@ -144,8 +163,11 @@
     }).then((unlisten) => unlisteners.push(unlisten));
 
     void checkForUpdates();
+    void refreshFirefoxBridgeStatus();
+    const bridgeStatusInterval = window.setInterval(refreshFirefoxBridgeStatus, 3000);
 
     return () => {
+      window.clearInterval(bridgeStatusInterval);
       for (const unlisten of unlisteners) {
         unlisten();
       }
@@ -164,6 +186,7 @@
     searchStatus = "";
     searchError = "";
     tradeResult = null;
+    teleportStatuses = {};
     activeFilterTab = "item";
   }
 
@@ -171,6 +194,7 @@
     capture = null;
     selectedFilterIds = [];
     tradeResult = null;
+    teleportStatuses = {};
     searchStatus = "";
     searchError = "";
   }
@@ -236,8 +260,10 @@
       });
 
       tradeResult = result;
+      teleportStatuses = {};
       searchStatus = `Found ${result.total} listings. Showing ${result.fetchedCount}.`;
       localStorage.setItem("poe2TradeLeague", league);
+      void refreshFirefoxBridgeStatus();
     } catch (error) {
       searchStatus = "Search unavailable.";
       searchError = readableError(error);
@@ -258,6 +284,115 @@
     } catch (error) {
       searchError = readableError(error);
     }
+  }
+
+  async function refreshFirefoxBridgeStatus() {
+    try {
+      bridgeStatus = await invoke<FirefoxBridgeStatus>("firefox_bridge_status");
+      bridgeError = "";
+    } catch (error) {
+      bridgeError = readableError(error);
+    }
+  }
+
+  function firefoxBridgeLabel() {
+    if (bridgeError) {
+      return "Disconnected";
+    }
+
+    if (!bridgeStatus?.enabled) {
+      return "Disconnected";
+    }
+
+    if (bridgeStatus.connected) {
+      return "Ready";
+    }
+
+    return "Paired";
+  }
+
+  function firefoxBridgeDetail() {
+    if (bridgeError) {
+      return bridgeError;
+    }
+
+    if (!bridgeStatus?.enabled) {
+      return "Bridge unavailable.";
+    }
+
+    if (bridgeStatus.connected) {
+      return bridgeStatus.lastMessage ?? "Firefox add-on connected.";
+    }
+
+    return "Load the Firefox add-on, paste the port/key, and keep a POE tab open.";
+  }
+
+  function bridgeSetupText() {
+    if (!bridgeStatus?.enabled || !bridgeStatus.port) {
+      return "Bridge unavailable";
+    }
+
+    return `Port ${bridgeStatus.port} | Key ${bridgeStatus.pairingKey}`;
+  }
+
+  async function teleportToHideout(listing: TradeListing) {
+    if (!listing.canTeleport || teleportingListingId) {
+      return;
+    }
+
+    teleportingListingId = listing.id;
+    teleportStatuses = {
+      ...teleportStatuses,
+      [listing.id]: "Sending..."
+    };
+    searchError = "";
+
+    try {
+      const response = await invoke<TeleportToHideoutResponse>("teleport_to_hideout", {
+        listingId: listing.id
+      });
+      teleportStatuses = {
+        ...teleportStatuses,
+        [listing.id]: response.message || "Sent"
+      };
+      searchStatus = response.message || "Teleport request sent.";
+    } catch (error) {
+      const message = readableError(error);
+      teleportStatuses = {
+        ...teleportStatuses,
+        [listing.id]: message
+      };
+      searchError = message;
+    } finally {
+      teleportingListingId = "";
+      void refreshFirefoxBridgeStatus();
+    }
+  }
+
+  function teleportButtonLabel(listing: TradeListing) {
+    if (teleportingListingId === listing.id) {
+      return "Sending...";
+    }
+
+    const status = teleportStatuses[listing.id];
+    if (status === "Teleport request sent." || status === "sent") {
+      return "Sent";
+    }
+
+    if (status && status !== "Sending...") {
+      return "TP";
+    }
+
+    return "TP";
+  }
+
+  function isTeleportError(status?: string) {
+    return Boolean(
+      status &&
+        status !== "Sending..." &&
+        status !== "Teleport request sent." &&
+        status !== "sent"
+    );
   }
 
   async function checkForUpdates() {
@@ -513,6 +648,15 @@
           <p>{updateError}</p>
         </div>
       {/if}
+
+      <div class="bridge-card">
+        <div class="bridge-heading">
+          <span>Firefox TP</span>
+          <strong class:ready={bridgeStatus?.connected}>{firefoxBridgeLabel()}</strong>
+        </div>
+        <p>{firefoxBridgeDetail()}</p>
+        <code>{bridgeSetupText()}</code>
+      </div>
     </aside>
 
     <section class="item-panel" id="filters">
@@ -771,7 +915,20 @@
                         <h4>{listingTitle(listing)}</h4>
                         <p>{listingSubtitle(listing)}</p>
                       </div>
-                      <strong>{formatPrice(listing.price)}</strong>
+                      <div class="listing-actions">
+                        {#if listing.canTeleport}
+                          <button
+                            class="tp-button"
+                            type="button"
+                            onclick={() => teleportToHideout(listing)}
+                            disabled={Boolean(teleportingListingId)}
+                            title="Teleport to seller hideout"
+                          >
+                            {teleportButtonLabel(listing)}
+                          </button>
+                        {/if}
+                        <strong>{formatPrice(listing.price)}</strong>
+                      </div>
                     </div>
 
                     <div class="seller-line">
@@ -780,6 +937,12 @@
                         <span>{listing.indexed}</span>
                       {/if}
                     </div>
+
+                    {#if teleportStatuses[listing.id]}
+                      <p class:error={isTeleportError(teleportStatuses[listing.id])} class="teleport-status">
+                        {teleportStatuses[listing.id]}
+                      </p>
+                    {/if}
 
                     {#if listing.item.pseudoMods.length}
                       <div class="mod-list pseudo-mods">
@@ -1199,6 +1362,42 @@
   .update-line strong {
     color: var(--ink);
     text-align: right;
+  }
+
+  .bridge-card {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-subtle);
+    font-size: 0.8rem;
+  }
+
+  .bridge-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .bridge-heading span,
+  .bridge-card p {
+    color: var(--muted);
+  }
+
+  .bridge-heading strong {
+    color: #fde68a;
+  }
+
+  .bridge-heading strong.ready {
+    color: var(--success);
+  }
+
+  .bridge-card code {
+    overflow-wrap: anywhere;
+    color: var(--ink);
+    font-size: 0.74rem;
   }
 
   .workspace-heading {
@@ -1671,6 +1870,29 @@
     gap: 12px;
   }
 
+  .listing-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: end;
+    gap: 8px;
+  }
+
+  .tp-button {
+    min-height: 28px;
+    padding: 0 10px;
+    border-color: rgba(45, 159, 137, 0.45);
+    color: #cfe8dc;
+    background: #1f332c;
+    font-size: 0.78rem;
+    font-weight: 800;
+  }
+
+  .tp-button:not(:disabled):hover {
+    border-color: rgba(45, 159, 137, 0.8);
+    background: #25483e;
+  }
+
   .listing-title h4 {
     font-size: 0.95rem;
     line-height: 1.25;
@@ -1690,6 +1912,17 @@
   .seller-line {
     flex-wrap: wrap;
     gap: 8px 14px;
+  }
+
+  .teleport-status {
+    color: var(--success);
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  .teleport-status.error {
+    color: #ffb4a9;
   }
 
   .mod-list {

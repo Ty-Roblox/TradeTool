@@ -1,0 +1,18 @@
+TradeTool POE2 Firefox Bridge
+
+This add-on lets TradeTool send a teleport-to-hideout whisper through a logged-in
+Firefox tab on pathofexile.com. TradeTool never receives Firefox cookies.
+
+Side-load for local testing:
+
+1. Open Firefox and go to about:debugging#/runtime/this-firefox.
+2. Click Load Temporary Add-on.
+3. Select firefox-addon/manifest.json from this project.
+4. Open the add-on preferences.
+5. Copy the Port and Key shown in TradeTool's Firefox TP panel.
+6. Keep a logged-in https://www.pathofexile.com/ tab open.
+7. Search in TradeTool and press TP on a listing that has teleport support.
+
+The add-on polls http://127.0.0.1:{port}/next with the pairing key, receives only
+a one-time hideout token from TradeTool memory, and posts the official
+/api/trade2/whisper request from the logged-in Firefox page context.

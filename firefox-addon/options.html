@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>TradeTool POE2 TP Bridge</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <h1>TradeTool POE2 TP Bridge</h1>
+      <p>
+        Paste the local bridge values shown in TradeTool. Firefox must be logged
+        into pathofexile.com for TP requests to work.
+      </p>
+
+      <label>
+        Bridge port
+        <input id="port" type="number" min="1" max="65535" />
+      </label>
+
+      <label>
+        Pairing key
+        <input id="pairingKey" type="password" autocomplete="off" />
+      </label>
+
+      <div class="actions">
+        <button id="save" type="button">Save</button>
+        <button id="test" type="button">Test bridge</button>
+      </div>
+
+      <p id="status" role="status"></p>
+    </main>
+
+    <script src="options.js"></script>
+  </body>
+</html>

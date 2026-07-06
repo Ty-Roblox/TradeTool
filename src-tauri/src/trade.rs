@@ -305,33 +305,42 @@ pub fn map_fetch_response(response_body: &str) -> Result<Vec<TradeListing>, Stri
     Ok(response
         .result
         .into_iter()
-        .map(|result| TradeListing {
-            id: result.id,
-            indexed: result.listing.indexed,
-            price: result.listing.price.and_then(|price| {
-                Some(TradePrice {
-                    price_type: price.price_type,
-                    amount: price.amount?,
-                    currency: price.currency?,
-                })
-            }),
-            account_name: result.listing.account.and_then(|account| account.name),
-            item: TradeListingItem {
-                icon: result.item.icon,
-                name: result.item.name.filter(|name| !name.trim().is_empty()),
-                type_line: result.item.type_line,
-                base_type: result.item.base_type,
-                rarity: result.item.rarity,
-                item_level: result.item.item_level,
-                explicit_mods: result
-                    .item
-                    .explicit_mods
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter_map(FetchMod::into_text)
-                    .collect(),
-                pseudo_mods: result.item.pseudo_mods.unwrap_or_default(),
-            },
+        .map(|result| {
+            let hideout_token = result
+                .listing
+                .hideout_token
+                .filter(|token| !token.trim().is_empty());
+
+            TradeListing {
+                id: result.id,
+                indexed: result.listing.indexed,
+                price: result.listing.price.and_then(|price| {
+                    Some(TradePrice {
+                        price_type: price.price_type,
+                        amount: price.amount?,
+                        currency: price.currency?,
+                    })
+                }),
+                account_name: result.listing.account.and_then(|account| account.name),
+                can_teleport: hideout_token.is_some(),
+                hideout_token,
+                item: TradeListingItem {
+                    icon: result.item.icon,
+                    name: result.item.name.filter(|name| !name.trim().is_empty()),
+                    type_line: result.item.type_line,
+                    base_type: result.item.base_type,
+                    rarity: result.item.rarity,
+                    item_level: result.item.item_level,
+                    explicit_mods: result
+                        .item
+                        .explicit_mods
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter_map(FetchMod::into_text)
+                        .collect(),
+                    pseudo_mods: result.item.pseudo_mods.unwrap_or_default(),
+                },
+            }
         })
         .collect())
 }
@@ -1160,6 +1169,7 @@ struct FetchListing {
     indexed: Option<String>,
     price: Option<FetchPrice>,
     account: Option<FetchAccount>,
+    hideout_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1608,11 +1618,8 @@ Has 2(1-3) Charm Slots";
     #[test]
     fn query_builder_maps_ranged_charm_slots() {
         let item = parse_item_text(RARE_BELT_WITH_CHARM_SLOTS).expect("item should parse");
-        let query = build_trade_query(
-            &item,
-            &["stat:explicit.stat_1416292992:3".to_string()],
-        )
-        .expect("query should build");
+        let query = build_trade_query(&item, &["stat:explicit.stat_1416292992:3".to_string()])
+            .expect("query should build");
 
         let filter = &query["query"]["stats"][0]["filters"][0];
         assert_eq!(filter["id"], "explicit.stat_1416292992");
@@ -1681,10 +1688,42 @@ Has 2(1-3) Charm Slots";
             listings[0].item.pseudo_mods,
             vec!["+45% total Elemental Resistance"]
         );
+        assert!(listings[0].can_teleport);
+        assert_eq!(listings[0].hideout_token.as_deref(), Some("secret-token"));
 
         let serialized = serde_json::to_string(&listings[0]).expect("listing should serialize");
+        assert!(serialized.contains("\"canTeleport\":true"));
         assert!(!serialized.contains("hideout_token"));
         assert!(!serialized.contains("secret-token"));
+    }
+
+    #[test]
+    fn fetch_response_mapper_marks_listing_without_hideout_token_not_teleportable() {
+        let response = r#"{
+            "result": [{
+                "id": "no-token-listing",
+                "listing": {
+                    "indexed": "2026-07-04T14:26:51Z",
+                    "price": { "type": "~b/o", "amount": 5, "currency": "chaos" },
+                    "account": { "name": "SGM#6552", "online": null }
+                },
+                "item": {
+                    "icon": "https://web.poecdn.com/image.png",
+                    "name": "Cataclysm Road",
+                    "typeLine": "Bound Sandals",
+                    "baseType": "Bound Sandals",
+                    "rarity": "Rare",
+                    "ilvl": 82,
+                    "explicitMods": [],
+                    "pseudoMods": []
+                }
+            }]
+        }"#;
+
+        let listings = map_fetch_response(response).expect("fetch response should map");
+
+        assert!(!listings[0].can_teleport);
+        assert!(listings[0].hideout_token.is_none());
     }
 
     #[test]

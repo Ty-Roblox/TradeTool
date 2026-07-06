@@ -111,6 +111,9 @@ pub struct TradeListing {
     pub indexed: Option<String>,
     pub price: Option<TradePrice>,
     pub account_name: Option<String>,
+    pub can_teleport: bool,
+    #[serde(skip_serializing, skip_deserializing, default)]
+    pub hideout_token: Option<String>,
     pub item: TradeListingItem,
 }
 
