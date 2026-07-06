@@ -3,6 +3,7 @@ mod filters;
 mod firefox_bridge;
 mod models;
 mod parser;
+mod poe_keywords;
 mod stat_patterns;
 mod trade;
 

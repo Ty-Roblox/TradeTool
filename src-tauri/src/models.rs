@@ -186,4 +186,10 @@ pub struct TradeTextSegment {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
 }

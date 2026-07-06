@@ -139,6 +139,9 @@
   type RichTextSegment = {
     text: string;
     tag?: string;
+    label?: string;
+    description?: string;
+    category?: string;
   };
 
   type QuickJewelStat = {
@@ -745,10 +748,30 @@
       return "";
     }
 
-    return `poe-tag-${tag
+    return `poe-tag-${slugClass(tag)}`;
+  }
+
+  function poeCategoryClass(category?: string) {
+    if (!category) {
+      return "";
+    }
+
+    return `poe-category-${slugClass(category)}`;
+  }
+
+  function slugClass(value: string) {
+    return value
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")}`;
+      .replace(/^-|-$/g, "");
+  }
+
+  function poeSegmentTitle(segment: RichTextSegment) {
+    if (segment.description) {
+      return `${segment.label ?? segment.text}: ${segment.description}`;
+    }
+
+    return segment.label ?? formatFilterTag(segment.tag);
   }
 
   function formatFilterTag(value?: string) {
@@ -1250,8 +1273,8 @@
                             {#each line as segment}
                               {#if segment.tag}
                                 <span
-                                  class={`poe-token ${poeTagClass(segment.tag)}`}
-                                  title={formatFilterTag(segment.tag)}
+                                  class={`poe-token ${poeTagClass(segment.tag)} ${poeCategoryClass(segment.category)}`}
+                                  title={poeSegmentTitle(segment)}
                                   >{segment.text}</span
                                 >
                               {:else}
@@ -1270,8 +1293,8 @@
                             {#each line as segment}
                               {#if segment.tag}
                                 <span
-                                  class={`poe-token ${poeTagClass(segment.tag)}`}
-                                  title={formatFilterTag(segment.tag)}
+                                  class={`poe-token ${poeTagClass(segment.tag)} ${poeCategoryClass(segment.category)}`}
+                                  title={poeSegmentTitle(segment)}
                                   >{segment.text}</span
                                 >
                               {:else}
@@ -2434,6 +2457,30 @@
   .poe-token {
     color: var(--gold);
     font-weight: 800;
+  }
+
+  .poe-category-damage {
+    color: #ffb06f;
+  }
+
+  .poe-category-defence {
+    color: #7fc7ff;
+  }
+
+  .poe-category-resource {
+    color: #8fe7c9;
+  }
+
+  .poe-category-ailment-debuff {
+    color: #d0a6ff;
+  }
+
+  .poe-category-entity {
+    color: #c6a7ff;
+  }
+
+  .poe-category-combat {
+    color: #f7d774;
   }
 
   .poe-tag-energyshield {

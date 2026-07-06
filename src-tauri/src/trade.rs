@@ -5,6 +5,7 @@ use crate::models::{
     AppDiagnostic, CapturedItem, FilterValueOverride, ItemModifier, TradeListing, TradeListingItem,
     TradePrice, TradeSearchResponse, TradeTextSegment,
 };
+use crate::poe_keywords::describe_keyword;
 use crate::stat_patterns::STAT_PATTERNS;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -1748,6 +1749,9 @@ fn trade_text_segments(text: &str) -> Vec<TradeTextSegment> {
             segments.push(TradeTextSegment {
                 text: std::mem::take(&mut plain),
                 tag: None,
+                label: None,
+                description: None,
+                category: None,
             });
         }
 
@@ -1756,9 +1760,13 @@ fn trade_text_segments(text: &str) -> Vec<TradeTextSegment> {
             .map_or((tag.as_str(), tag.as_str()), |(tag_name, display)| {
                 (tag_name, display)
             });
+        let keyword = describe_keyword(tag_name);
         segments.push(TradeTextSegment {
             text: display.to_string(),
             tag: Some(tag_name.to_string()),
+            label: keyword.map(|keyword| keyword.label.to_string()),
+            description: keyword.map(|keyword| keyword.description.to_string()),
+            category: keyword.map(|keyword| keyword.category.to_string()),
         });
     }
 
@@ -1766,6 +1774,9 @@ fn trade_text_segments(text: &str) -> Vec<TradeTextSegment> {
         segments.push(TradeTextSegment {
             text: plain,
             tag: None,
+            label: None,
+            description: None,
+            category: None,
         });
     }
 
@@ -2790,6 +2801,54 @@ Item Level: 2";
     }
 
     #[test]
+    fn trade_text_segments_enriches_curse_keyword() {
+        let segments = super::trade_text_segments("[Curse]");
+
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "Curse");
+        assert_eq!(segments[0].tag.as_deref(), Some("Curse"));
+        assert_eq!(segments[0].label.as_deref(), Some("Curse"));
+        assert_eq!(segments[0].category.as_deref(), Some("ailment-debuff"));
+        assert!(segments[0]
+            .description
+            .as_deref()
+            .expect("curse description")
+            .contains("debuff"));
+    }
+
+    #[test]
+    fn trade_text_segments_preserves_alias_and_enriches_energy_shield_keyword() {
+        let segments = super::trade_text_segments("[EnergyShield|Energy Shield]");
+
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "Energy Shield");
+        assert_eq!(segments[0].tag.as_deref(), Some("EnergyShield"));
+        assert_eq!(segments[0].label.as_deref(), Some("Energy Shield"));
+        assert_eq!(segments[0].category.as_deref(), Some("defence"));
+        assert!(segments[0]
+            .description
+            .as_deref()
+            .expect("energy shield description")
+            .contains("damage"));
+    }
+
+    #[test]
+    fn trade_text_segments_keeps_unknown_keywords_serializable() {
+        let segments = super::trade_text_segments("[FuturePoe2Thing]");
+
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "FuturePoe2Thing");
+        assert_eq!(segments[0].tag.as_deref(), Some("FuturePoe2Thing"));
+        assert!(segments[0].label.is_none());
+        assert!(segments[0].description.is_none());
+        assert!(segments[0].category.is_none());
+
+        let serialized =
+            serde_json::to_string(&segments[0]).expect("unknown segment should serialize");
+        assert!(serialized.contains("FuturePoe2Thing"));
+    }
+
+    #[test]
     fn fetch_response_mapper_extracts_listing_summary_without_hideout_token() {
         let response = r#"{
             "result": [{
@@ -2842,10 +2901,19 @@ Item Level: 2";
                 TradeTextSegment {
                     text: "124% increased ".to_string(),
                     tag: None,
+                    label: None,
+                    description: None,
+                    category: None,
                 },
                 TradeTextSegment {
                     text: "Energy Shield".to_string(),
                     tag: Some("EnergyShield".to_string()),
+                    label: Some("Energy Shield".to_string()),
+                    description: Some(
+                        "A protective resource that absorbs damage before Life until depleted."
+                            .to_string()
+                    ),
+                    category: Some("defence".to_string()),
                 },
             ]
         );
