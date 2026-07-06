@@ -4,6 +4,7 @@
   import { relaunch } from "@tauri-apps/plugin-process";
   import { check } from "@tauri-apps/plugin-updater";
   import { onMount } from "svelte";
+  import quickEquipmentFilters from "$lib/quick-equipment-filters.json";
   import quickJewelFilters from "$lib/quick-jewel-filters.json";
 
   type ItemProperty = {
@@ -148,6 +149,7 @@
     id: string;
     label: string;
     min?: number;
+    max?: number;
   };
 
   type QuickJewelFilter = {
@@ -157,7 +159,27 @@
     stats: QuickJewelStat[];
   };
 
+  type QuickEquipmentStat = {
+    id: string;
+    label: string;
+    min?: number;
+    max?: number;
+  };
+
+  type QuickEquipmentFilter = {
+    id: string;
+    label: string;
+    category: string;
+    stats: QuickEquipmentStat[];
+  };
+
+  type QuickStatDefaults = {
+    min?: number | null;
+    max?: number | null;
+  };
+
   const quickJewels = quickJewelFilters as QuickJewelFilter[];
+  const quickEquipment = quickEquipmentFilters as QuickEquipmentFilter[];
 
   let league = $state("Runes of Aldur");
   let rawText = $state("");
@@ -167,9 +189,11 @@
   let selectedQuickFilterIds = $state<string[]>([]);
   let filterRanges = $state<Record<string, FilterRange>>({});
   let activePriceProfileId = $state("");
-  let activeFilterTab = $state<"item" | "jewels">("jewels");
+  let activeFilterTab = $state<"item" | "jewels" | "equipment">("jewels");
   let activeJewelId = $state(quickJewels[0]?.id ?? "");
   let quickStatId = $state(quickJewels[0]?.stats[0]?.id ?? "");
+  let activeEquipmentId = $state(quickEquipment[0]?.id ?? "");
+  let quickEquipmentStatId = $state(quickEquipment[0]?.stats[0]?.id ?? "");
   let captureStatus = $state("Ready");
   let captureError = $state("");
   let searchStatus = $state("");
@@ -519,12 +543,24 @@
     return quickJewels.find((jewel) => jewel.id === activeJewelId) ?? quickJewels[0];
   }
 
+  function activeEquipment() {
+    return quickEquipment.find((equipment) => equipment.id === activeEquipmentId) ?? quickEquipment[0];
+  }
+
   function quickBaseFilterId(jewelId: string) {
     return `quick:jewel:${jewelId}:base`;
   }
 
   function quickStatFilterId(jewelId: string, statId: string) {
     return `quick:jewel:${jewelId}:stat:${statId}`;
+  }
+
+  function quickEquipmentBaseFilterId(equipmentId: string) {
+    return `quick:equipment:${equipmentId}:base`;
+  }
+
+  function quickEquipmentStatFilterId(equipmentId: string, statId: string) {
+    return `quick:equipment:${equipmentId}:stat:${statId}`;
   }
 
   function selectQuickJewel(jewelId: string) {
@@ -543,6 +579,24 @@
     clearSearchResult();
   }
 
+  function selectQuickEquipment(equipmentId: string) {
+    const switching = activeEquipmentId !== equipmentId;
+    activeEquipmentId = equipmentId;
+
+    const equipment = activeEquipment();
+    quickEquipmentStatId = equipment?.stats[0]?.id ?? "";
+
+    const nextFilters = switching
+      ? selectedQuickFilterIds.filter((id) => !id.startsWith("quick:equipment:"))
+      : selectedQuickFilterIds;
+
+    selectedQuickFilterIds = Array.from(
+      new Set([...nextFilters, quickEquipmentBaseFilterId(equipmentId)])
+    );
+    activeFilterTab = "equipment";
+    clearSearchResult();
+  }
+
   function addQuickJewelStat() {
     const jewel = activeJewel();
     if (!jewel || !quickStatId) {
@@ -556,22 +610,47 @@
         quickStatFilterId(jewel.id, quickStatId)
       ])
     );
-    ensureFilterRange(quickStatFilterId(jewel.id, quickStatId), quickStatDefaultMin(jewel.id, quickStatId));
+    const defaults = quickStatDefaults(jewel.id, quickStatId);
+    ensureFilterRange(quickStatFilterId(jewel.id, quickStatId), defaults.min, defaults.max);
+    clearSearchResult();
+  }
+
+  function addQuickEquipmentStat() {
+    const equipment = activeEquipment();
+    if (!equipment || !quickEquipmentStatId) {
+      return;
+    }
+
+    selectedQuickFilterIds = Array.from(
+      new Set([
+        ...selectedQuickFilterIds,
+        quickEquipmentBaseFilterId(equipment.id),
+        quickEquipmentStatFilterId(equipment.id, quickEquipmentStatId)
+      ])
+    );
+    const defaults = quickEquipmentStatDefaults(equipment.id, quickEquipmentStatId);
+    ensureFilterRange(
+      quickEquipmentStatFilterId(equipment.id, quickEquipmentStatId),
+      defaults.min,
+      defaults.max
+    );
     clearSearchResult();
   }
 
   function removeQuickFilter(id: string) {
     const parts = id.split(":");
-    const jewelId = parts[2];
+    const quickType = parts[1];
+    const presetId = parts[2];
+    const prefix = `quick:${quickType}:${presetId}:`;
 
     const removedIds =
       parts[3] === "base"
-        ? selectedQuickFilterIds.filter((filterId) => filterId.startsWith(`quick:jewel:${jewelId}:`))
+        ? selectedQuickFilterIds.filter((filterId) => filterId.startsWith(prefix))
         : [id];
 
     selectedQuickFilterIds =
       parts[3] === "base"
-        ? selectedQuickFilterIds.filter((filterId) => !filterId.startsWith(`quick:jewel:${jewelId}:`))
+        ? selectedQuickFilterIds.filter((filterId) => !filterId.startsWith(prefix))
         : selectedQuickFilterIds.filter((filterId) => filterId !== id);
     removeFilterRanges(removedIds);
 
@@ -580,6 +659,25 @@
 
   function quickFilterLabel(id: string) {
     const parts = id.split(":");
+    const quickType = parts[1];
+    const presetId = parts[2];
+
+    if (quickType === "equipment") {
+      const equipment = quickEquipment.find((candidate) => candidate.id === presetId);
+
+      if (!equipment) {
+        return id;
+      }
+
+      if (parts[3] === "base") {
+        return `${equipment.label} category`;
+      }
+
+      const statId = parts.slice(4).join(":");
+      const stat = equipment.stats.find((candidate) => candidate.id === statId);
+      return stat ? `${equipment.label}: ${stat.label}` : id;
+    }
+
     const jewel = quickJewels.find((candidate) => candidate.id === parts[2]);
 
     if (!jewel) {
@@ -597,6 +695,10 @@
 
   function isQuickBaseSelected(jewelId: string) {
     return selectedQuickFilterIds.includes(quickBaseFilterId(jewelId));
+  }
+
+  function isQuickEquipmentBaseSelected(equipmentId: string) {
+    return selectedQuickFilterIds.includes(quickEquipmentBaseFilterId(equipmentId));
   }
 
   function clearSearchResult() {
@@ -619,7 +721,7 @@
 
   function quickFilterRanges() {
     return Object.fromEntries(
-      Object.entries(filterRanges).filter(([id]) => id.startsWith("quick:jewel:"))
+      Object.entries(filterRanges).filter(([id]) => id.startsWith("quick:"))
     );
   }
 
@@ -674,10 +776,26 @@
       .find((filter) => filter.id === id);
   }
 
-  function quickStatDefaultMin(jewelId: string, statId: string) {
-    return quickJewels
+  function quickStatDefaults(jewelId: string, statId: string): QuickStatDefaults {
+    const stat = quickJewels
       .find((jewel) => jewel.id === jewelId)
-      ?.stats.find((stat) => stat.id === statId)?.min;
+      ?.stats.find((candidate) => candidate.id === statId);
+
+    return {
+      min: stat?.min,
+      max: stat?.max
+    };
+  }
+
+  function quickEquipmentStatDefaults(equipmentId: string, statId: string): QuickStatDefaults {
+    const stat = quickEquipment
+      .find((equipment) => equipment.id === equipmentId)
+      ?.stats.find((candidate) => candidate.id === statId);
+
+    return {
+      min: stat?.min,
+      max: stat?.max
+    };
   }
 
   function selectedFilterValues(filterIds: string[]): FilterValueOverride[] {
@@ -909,6 +1027,15 @@
           Quick Jewels
         </button>
         <button
+          class:active-tab={activeFilterTab === "equipment"}
+          type="button"
+          role="tab"
+          aria-selected={activeFilterTab === "equipment"}
+          onclick={() => (activeFilterTab = "equipment")}
+        >
+          Quick Equipment
+        </button>
+        <button
           class:active-tab={activeFilterTab === "item"}
           type="button"
           role="tab"
@@ -962,6 +1089,89 @@
               type="button"
               onclick={addQuickJewelStat}
               disabled={!quickStatId || searching}
+            >
+              Add Stat
+            </button>
+          </div>
+
+          {#if selectedQuickFilterIds.length}
+            <div class="quick-chip-list" aria-label="Selected quick filters">
+              {#each selectedQuickFilterIds as id}
+                <div class="quick-chip">
+                  <span>{quickFilterLabel(id)}</span>
+                  {#if filterRanges[id]}
+                    <div class="range-controls compact-range" aria-label={`${quickFilterLabel(id)} range`}>
+                      <label>
+                        <span>Min</span>
+                        <input
+                          type="number"
+                          inputmode="decimal"
+                          value={filterRanges[id].min}
+                          oninput={(event) =>
+                            updateFilterRange(id, "min", (event.currentTarget as HTMLInputElement).value)}
+                        />
+                      </label>
+                      <label>
+                        <span>Max</span>
+                        <input
+                          type="number"
+                          inputmode="decimal"
+                          value={filterRanges[id].max}
+                          oninput={(event) =>
+                            updateFilterRange(id, "max", (event.currentTarget as HTMLInputElement).value)}
+                        />
+                      </label>
+                    </div>
+                  {/if}
+                  <button type="button" onclick={() => removeQuickFilter(id)}>Remove</button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </section>
+      {:else if activeFilterTab === "equipment"}
+        <section class="quick-filter-panel">
+          <div class="quick-filter-heading">
+            <div>
+              <span class="eyebrow">Quick filter</span>
+              <h3>{activeEquipment()?.label ?? "Equipment"}</h3>
+            </div>
+            <span>{activeEquipment()?.stats.length ?? 0} stats</span>
+          </div>
+
+          <div class="jewel-picker" aria-label="Equipment categories">
+            {#each quickEquipment as equipment}
+              <button
+                class:jewel-active={activeEquipmentId === equipment.id ||
+                  isQuickEquipmentBaseSelected(equipment.id)}
+                type="button"
+                onclick={() => selectQuickEquipment(equipment.id)}
+              >
+                <strong>{equipment.label}</strong>
+                <span>{equipment.stats.length ? `${equipment.stats.length} stats` : "category only"}</span>
+              </button>
+            {/each}
+          </div>
+
+          <div class="quick-builder">
+            <label>
+              <span>Stat</span>
+              <select bind:value={quickEquipmentStatId} disabled={!activeEquipment()?.stats.length}>
+                {#each activeEquipment()?.stats ?? [] as stat}
+                  <option value={stat.id}>
+                    {stat.label}{stat.min ? ` (${stat.min}+ default)` : ""}
+                  </option>
+                {/each}
+              </select>
+            </label>
+            <button class="secondary-action" type="button" onclick={() => selectQuickEquipment(activeEquipmentId)}>
+              Set Category
+            </button>
+            <button
+              class="primary-action"
+              type="button"
+              onclick={addQuickEquipmentStat}
+              disabled={!quickEquipmentStatId || searching}
             >
               Add Stat
             </button>

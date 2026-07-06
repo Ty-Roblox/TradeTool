@@ -13,6 +13,8 @@ use serde_json::{json, Value};
 const TRADE_BASE_URL: &str = "https://www.pathofexile.com";
 const FETCH_PAGE_SIZE: usize = 10;
 const QUICK_JEWEL_FILTERS_JSON: &str = include_str!("../../src/lib/quick-jewel-filters.json");
+const QUICK_EQUIPMENT_FILTERS_JSON: &str =
+    include_str!("../../src/lib/quick-equipment-filters.json");
 const EXACT_SELECTED_EXPLICIT_AFFIXES_FILTER_ID: &str = "misc:exact_selected_explicit_affixes";
 const EXACT_SELECTED_PREFIX_AFFIXES_FILTER_ID: &str = "misc:exact_selected_prefix_affixes";
 const EXACT_SELECTED_SUFFIX_AFFIXES_FILTER_ID: &str = "misc:exact_selected_suffix_affixes";
@@ -31,6 +33,24 @@ struct QuickJewelStat {
     id: String,
     label: String,
     min: Option<f64>,
+    max: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QuickEquipmentFilter {
+    id: String,
+    label: String,
+    category: String,
+    stats: Vec<QuickEquipmentStat>,
+}
+
+#[derive(Debug, Deserialize)]
+struct QuickEquipmentStat {
+    id: String,
+    label: String,
+    min: Option<f64>,
+    max: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1127,7 +1147,41 @@ fn quick_filter_specs() -> Vec<TradeFilterSpec> {
                 kind: TradeFilterKind::Stat {
                     stat_id: stat.id.clone(),
                     value: stat.min,
-                    max_value: None,
+                    max_value: stat.max,
+                },
+            });
+        }
+    }
+
+    for equipment in quick_equipment_filters() {
+        specs.push(TradeFilterSpec {
+            id: format!("quick:equipment:{}:base", equipment.id),
+            label: format!("Equipment: {}", equipment.label),
+            selected_by_default: false,
+            source_modifier_index: None,
+            source: None,
+            affix_side: None,
+            score: None,
+            selection_reason: None,
+            profile_ids: Vec::new(),
+            kind: TradeFilterKind::Category(equipment.category.clone()),
+        });
+
+        for stat in &equipment.stats {
+            specs.push(TradeFilterSpec {
+                id: format!("quick:equipment:{}:stat:{}", equipment.id, stat.id),
+                label: format!("{}: {}", equipment.label, stat.label),
+                selected_by_default: false,
+                source_modifier_index: None,
+                source: None,
+                affix_side: None,
+                score: None,
+                selection_reason: None,
+                profile_ids: Vec::new(),
+                kind: TradeFilterKind::Stat {
+                    stat_id: stat.id.clone(),
+                    value: stat.min,
+                    max_value: stat.max,
                 },
             });
         }
@@ -1143,6 +1197,17 @@ fn quick_jewel_filters() -> &'static [QuickJewelFilter] {
         .get_or_init(|| {
             serde_json::from_str(QUICK_JEWEL_FILTERS_JSON)
                 .expect("quick jewel filter catalog should be valid JSON")
+        })
+        .as_slice()
+}
+
+fn quick_equipment_filters() -> &'static [QuickEquipmentFilter] {
+    static FILTERS: OnceLock<Vec<QuickEquipmentFilter>> = OnceLock::new();
+
+    FILTERS
+        .get_or_init(|| {
+            serde_json::from_str(QUICK_EQUIPMENT_FILTERS_JSON)
+                .expect("quick equipment filter catalog should be valid JSON")
         })
         .as_slice()
 }
@@ -2700,6 +2765,46 @@ Item Level: 2";
                 ("explicit.stat_2527686725", 10),
                 ("explicit.stat_3556824919", 10),
                 ("explicit.stat_587431675", 10),
+            ]
+        );
+    }
+
+    #[test]
+    fn query_builder_accepts_quick_equipment_filters() {
+        let item = empty_item();
+        let query = build_trade_query(
+            &item,
+            &[
+                "quick:equipment:boots:base".to_string(),
+                "quick:equipment:boots:stat:explicit.stat_2250533757".to_string(),
+                "quick:equipment:boots:stat:pseudo.pseudo_total_elemental_resistance".to_string(),
+            ],
+        )
+        .expect("quick equipment query should build");
+
+        assert_eq!(
+            query["query"]["filters"]["type_filters"]["filters"]["category"]["option"],
+            "armour.boots"
+        );
+
+        let filters = query["query"]["stats"][0]["filters"]
+            .as_array()
+            .expect("stat filters");
+        let observed = filters
+            .iter()
+            .map(|filter| {
+                (
+                    filter["id"].as_str().expect("id"),
+                    filter["value"]["min"].as_i64().expect("min"),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            observed,
+            vec![
+                ("explicit.stat_2250533757", 25),
+                ("pseudo.pseudo_total_elemental_resistance", 60),
             ]
         );
     }
