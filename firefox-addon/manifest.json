@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "TradeTool POE2 TP Bridge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Lets TradeTool ask logged-in Firefox to send POE2 trade hideout TP requests.",
   "browser_specific_settings": {
     "gecko": {
