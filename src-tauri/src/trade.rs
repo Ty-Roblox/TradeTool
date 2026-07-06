@@ -2809,11 +2809,12 @@ Item Level: 2";
         assert_eq!(segments[0].tag.as_deref(), Some("Curse"));
         assert_eq!(segments[0].label.as_deref(), Some("Curse"));
         assert_eq!(segments[0].category.as_deref(), Some("ailment-debuff"));
-        assert!(segments[0]
+        let description = segments[0]
             .description
             .as_deref()
-            .expect("curse description")
-            .contains("debuff"));
+            .expect("curse description");
+        assert!(description.contains("one Curse by default"));
+        assert!(description.contains("15/30/50% less Curse effect"));
     }
 
     #[test]
@@ -2910,7 +2911,7 @@ Item Level: 2";
                     tag: Some("EnergyShield".to_string()),
                     label: Some("Energy Shield".to_string()),
                     description: Some(
-                        "A protective resource that absorbs damage before Life until depleted."
+                        "Energy Shield protects Life by taking damage first. It rapidly recharges after you stop losing Energy Shield for a short time."
                             .to_string()
                     ),
                     category: Some("defence".to_string()),
