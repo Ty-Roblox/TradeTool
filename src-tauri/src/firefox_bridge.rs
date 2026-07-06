@@ -1,8 +1,11 @@
 use crate::models::TradeListing;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::env;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+#[cfg(windows)]
+use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -12,6 +15,9 @@ const BRIDGE_PORT_END: u16 = 17661;
 const PAIRING_HEADER: &str = "x-tradetool-key";
 const TELEPORT_RESULT_TIMEOUT: Duration = Duration::from_secs(15);
 const ADDON_CONNECTED_WINDOW: Duration = Duration::from_secs(35);
+const PAIRING_KEY_NAMESPACE: &str = "TradeTool POE2 Firefox TP Bridge machine key v1";
+const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+const FNV_PRIME: u64 = 0x100000001b3;
 
 static BRIDGE: OnceLock<Arc<BridgeRuntime>> = OnceLock::new();
 
@@ -321,12 +327,113 @@ fn create_bridge_runtime() -> Arc<BridgeRuntime> {
 }
 
 fn generate_pairing_key() -> String {
+    machine_pairing_key().unwrap_or_else(generate_ephemeral_pairing_key)
+}
+
+fn machine_pairing_key() -> Option<String> {
+    derive_machine_pairing_key(&machine_pairing_signals())
+}
+
+fn generate_ephemeral_pairing_key() -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
     let stack_marker = &nanos as *const u128 as usize;
     format!("{nanos:x}{:x}{stack_marker:x}", std::process::id())
+}
+
+fn machine_pairing_signals() -> Vec<String> {
+    let mut signals = Vec::new();
+
+    if let Some(machine_guid) = windows_machine_guid_signal() {
+        signals.push(machine_guid);
+    }
+
+    push_env_signal(&mut signals, "computer-name", "COMPUTERNAME");
+    push_env_signal(&mut signals, "hostname", "HOSTNAME");
+
+    signals
+}
+
+fn push_env_signal(signals: &mut Vec<String>, label: &str, variable: &str) {
+    let Ok(value) = env::var(variable) else {
+        return;
+    };
+    let value = value.trim();
+    if !value.is_empty() {
+        signals.push(format!("{label}:{value}"));
+    }
+}
+
+#[cfg(windows)]
+fn windows_machine_guid_signal() -> Option<String> {
+    let output = Command::new("reg")
+        .args([
+            "query",
+            r"HKLM\SOFTWARE\Microsoft\Cryptography",
+            "/v",
+            "MachineGuid",
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    parse_windows_machine_guid(&String::from_utf8_lossy(&output.stdout))
+        .map(|guid| format!("machine-guid:{guid}"))
+}
+
+#[cfg(not(windows))]
+fn windows_machine_guid_signal() -> Option<String> {
+    None
+}
+
+#[cfg(windows)]
+fn parse_windows_machine_guid(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        if !line.to_ascii_lowercase().contains("machineguid") {
+            return None;
+        }
+
+        line.split_whitespace()
+            .last()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_ascii_lowercase())
+    })
+}
+
+fn derive_machine_pairing_key(signals: &[String]) -> Option<String> {
+    let mut normalized = signals
+        .iter()
+        .map(|signal| signal.trim())
+        .filter(|signal| !signal.is_empty())
+        .map(|signal| signal.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+
+    if normalized.is_empty() {
+        return None;
+    }
+
+    normalized.sort();
+    normalized.dedup();
+
+    let input = format!("{PAIRING_KEY_NAMESPACE}\n{}", normalized.join("\n"));
+    let first = fnv1a64(FNV_OFFSET, input.as_bytes());
+    let reversed = input.bytes().rev().collect::<Vec<_>>();
+    let second = fnv1a64(FNV_OFFSET ^ 0xa5a5_a5a5_a5a5_a5a5, &reversed);
+
+    Some(format!("{first:016x}{second:016x}"))
+}
+
+fn fnv1a64(seed: u64, bytes: &[u8]) -> u64 {
+    bytes.iter().fold(seed, |hash, byte| {
+        let hash = hash ^ u64::from(*byte);
+        hash.wrapping_mul(FNV_PRIME)
+    })
 }
 
 fn serve_bridge(listener: TcpListener, runtime: Arc<BridgeRuntime>) {
@@ -641,5 +748,38 @@ mod tests {
         assert!(core.is_valid_pairing_key("test-key"));
         assert!(!core.is_valid_pairing_key(""));
         assert!(!core.is_valid_pairing_key("wrong-key"));
+    }
+
+    #[test]
+    fn machine_pairing_key_is_deterministic_and_hex() {
+        let signals = vec![
+            "machine-guid:abc123".to_string(),
+            "computer-name:tradebox".to_string(),
+        ];
+
+        let first = derive_machine_pairing_key(&signals).expect("key should derive");
+        let second = derive_machine_pairing_key(&signals).expect("key should derive again");
+
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 32);
+        assert!(first.chars().all(|ch| ch.is_ascii_hexdigit()));
+        assert!(!first.contains("abc123"));
+        assert!(!first.contains("tradebox"));
+    }
+
+    #[test]
+    fn machine_pairing_key_changes_with_machine_signals() {
+        let first = derive_machine_pairing_key(&["machine-guid:first".to_string()])
+            .expect("first key should derive");
+        let second = derive_machine_pairing_key(&["machine-guid:second".to_string()])
+            .expect("second key should derive");
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn machine_pairing_key_requires_non_empty_signals() {
+        let empty = derive_machine_pairing_key(&["".to_string(), "   ".to_string()]);
+        assert!(empty.is_none());
     }
 }
