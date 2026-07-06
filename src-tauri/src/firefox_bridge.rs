@@ -38,7 +38,8 @@ pub struct TeleportToHideoutResponse {
 pub struct BridgePendingRequest {
     pub request_id: u64,
     pub listing_id: String,
-    pub token: String,
+    pub token: Option<String>,
+    pub fetch_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,10 +57,16 @@ struct PendingState {
     results: HashMap<u64, BridgeTeleportResult>,
 }
 
+#[derive(Debug, Clone)]
+struct ListingTeleportTarget {
+    token: Option<String>,
+    fetch_url: Option<String>,
+}
+
 #[derive(Debug)]
 pub struct BridgeCore {
     pairing_key: String,
-    tokens: Mutex<HashMap<String, String>>,
+    listings: Mutex<HashMap<String, ListingTeleportTarget>>,
     pending: Mutex<PendingState>,
 }
 
@@ -67,7 +74,7 @@ impl BridgeCore {
     pub fn new(pairing_key: String) -> Self {
         Self {
             pairing_key,
-            tokens: Mutex::new(HashMap::new()),
+            listings: Mutex::new(HashMap::new()),
             pending: Mutex::new(PendingState {
                 next_request_id: 1,
                 pending: None,
@@ -76,17 +83,27 @@ impl BridgeCore {
         }
     }
 
-    pub fn replace_listing_tokens(&self, listings: &[TradeListing]) {
-        let mut tokens = self.tokens.lock().expect("token store poisoned");
-        tokens.clear();
+    pub fn replace_listing_tokens(&self, listings: &[TradeListing], fetch_url: Option<&str>) {
+        let mut stored_listings = self.listings.lock().expect("listing store poisoned");
+        stored_listings.clear();
 
         for listing in listings {
-            if let Some(token) = listing
+            if !listing.can_teleport {
+                continue;
+            }
+
+            let token = listing
                 .hideout_token
                 .as_deref()
                 .filter(|token| !token.trim().is_empty())
-            {
-                tokens.insert(listing.id.clone(), token.to_string());
+                .map(str::to_string);
+            let fetch_url = fetch_url.map(str::to_string);
+
+            if token.is_some() || fetch_url.is_some() {
+                stored_listings.insert(
+                    listing.id.clone(),
+                    ListingTeleportTarget { token, fetch_url },
+                );
             }
         }
 
@@ -97,21 +114,25 @@ impl BridgeCore {
 
     #[cfg(test)]
     pub fn token_for_listing(&self, listing_id: &str) -> Option<String> {
-        self.tokens
+        self.listings
             .lock()
-            .expect("token store poisoned")
+            .expect("listing store poisoned")
             .get(listing_id)
-            .cloned()
+            .and_then(|listing| listing.token.clone())
     }
 
     pub fn queue_teleport(&self, listing_id: &str) -> Result<u64, String> {
-        let token = self
-            .tokens
+        let target = self
+            .listings
             .lock()
-            .expect("token store poisoned")
+            .expect("listing store poisoned")
             .get(listing_id)
             .cloned()
             .ok_or_else(|| "Teleport is not available for that listing.".to_string())?;
+
+        if target.token.is_none() && target.fetch_url.is_none() {
+            return Err("Teleport is not available for that listing.".to_string());
+        }
 
         let mut pending = self.pending.lock().expect("pending store poisoned");
         let request_id = pending.next_request_id;
@@ -119,7 +140,8 @@ impl BridgeCore {
         pending.pending = Some(BridgePendingRequest {
             request_id,
             listing_id: listing_id.to_string(),
-            token,
+            token: target.token,
+            fetch_url: target.fetch_url,
         });
         pending.results.remove(&request_id);
         Ok(request_id)
@@ -193,12 +215,12 @@ pub fn start() {
     let _ = bridge();
 }
 
-pub fn replace_listing_tokens(listings: &[TradeListing]) {
-    bridge().core.replace_listing_tokens(listings);
+pub fn replace_listing_tokens(listings: &[TradeListing], fetch_url: Option<&str>) {
+    bridge().core.replace_listing_tokens(listings, fetch_url);
 }
 
 pub fn clear_listing_tokens() {
-    bridge().core.replace_listing_tokens(&[]);
+    bridge().core.replace_listing_tokens(&[], None);
 }
 
 pub fn status() -> FirefoxBridgeStatus {
@@ -514,9 +536,13 @@ mod tests {
         TradeListing {
             id: id.to_string(),
             indexed: None,
-            price: None,
+            price: Some(crate::models::TradePrice {
+                price_type: Some("~b/o".to_string()),
+                amount: 1.0,
+                currency: "exalted".to_string(),
+            }),
             account_name: None,
-            can_teleport: token.is_some(),
+            can_teleport: true,
             hideout_token: token.map(str::to_string),
             item: TradeListingItem {
                 icon: None,
@@ -534,10 +560,13 @@ mod tests {
     #[test]
     fn token_store_replaces_previous_search_tokens() {
         let core = BridgeCore::new("test-key".to_string());
-        core.replace_listing_tokens(&[listing("old", Some("old-token"))]);
+        core.replace_listing_tokens(&[listing("old", Some("old-token"))], Some("old-fetch"));
         assert_eq!(core.token_for_listing("old").as_deref(), Some("old-token"));
 
-        core.replace_listing_tokens(&[listing("new", Some("new-token")), listing("empty", None)]);
+        core.replace_listing_tokens(
+            &[listing("new", Some("new-token")), listing("empty", None)],
+            Some("new-fetch"),
+        );
 
         assert!(core.token_for_listing("old").is_none());
         assert_eq!(core.token_for_listing("new").as_deref(), Some("new-token"));
@@ -545,16 +574,32 @@ mod tests {
     }
 
     #[test]
+    fn queue_teleport_can_use_fetch_url_when_token_is_missing() {
+        let core = BridgeCore::new("test-key".to_string());
+        core.replace_listing_tokens(&[listing("needs-firefox", None)], Some("fetch-url"));
+
+        let request_id = core
+            .queue_teleport("needs-firefox")
+            .expect("request should queue");
+        let pending = core.take_pending_request().expect("pending request");
+
+        assert_eq!(pending.request_id, request_id);
+        assert_eq!(pending.listing_id, "needs-firefox");
+        assert_eq!(pending.token, None);
+        assert_eq!(pending.fetch_url.as_deref(), Some("fetch-url"));
+    }
+
+    #[test]
     fn queue_teleport_rejects_unknown_and_missing_token_listings() {
         let core = BridgeCore::new("test-key".to_string());
-        core.replace_listing_tokens(&[listing("has-token", Some("secret-token"))]);
+        core.replace_listing_tokens(&[listing("has-token", Some("secret-token"))], Some("fetch"));
 
         let unknown = core.queue_teleport("missing");
         assert!(unknown
             .expect_err("unknown listing should fail")
             .contains("not available"));
 
-        core.replace_listing_tokens(&[listing("no-token", None)]);
+        core.replace_listing_tokens(&[listing("no-token", None)], None);
         let missing_token = core.queue_teleport("no-token");
         assert!(missing_token
             .expect_err("listing without token should fail")
@@ -564,7 +609,7 @@ mod tests {
     #[test]
     fn queued_teleport_can_be_taken_and_completed() {
         let core = BridgeCore::new("test-key".to_string());
-        core.replace_listing_tokens(&[listing("listing-1", Some("secret-token"))]);
+        core.replace_listing_tokens(&[listing("listing-1", Some("secret-token"))], Some("fetch"));
 
         let request_id = core
             .queue_teleport("listing-1")
@@ -573,7 +618,7 @@ mod tests {
 
         assert_eq!(pending.request_id, request_id);
         assert_eq!(pending.listing_id, "listing-1");
-        assert_eq!(pending.token, "secret-token");
+        assert_eq!(pending.token.as_deref(), Some("secret-token"));
 
         core.complete_request(BridgeTeleportResult {
             request_id,

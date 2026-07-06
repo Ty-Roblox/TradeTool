@@ -10,6 +10,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
     let trade_filters = trade_filter_specs(item)
         .into_iter()
         .map(|spec| FilterCandidate {
+            default_min: spec.default_min(),
+            default_max: spec.default_max(),
             id: spec.id,
             label: spec.label,
             selected_by_default: spec.selected_by_default,
@@ -34,6 +36,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
             selected_by_default: false,
             supported: true,
             unsupported_reason: None,
+            default_min: None,
+            default_max: None,
         });
     }
     if let Some(rarity) = &item.rarity {
@@ -43,6 +47,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
             selected_by_default: false,
             supported: true,
             unsupported_reason: None,
+            default_min: None,
+            default_max: None,
         });
     }
     if !identity.is_empty() {
@@ -61,6 +67,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
             selected_by_default: false,
             supported: true,
             unsupported_reason: None,
+            default_min: Some(item_level as f64),
+            default_max: None,
         });
     }
     if let Some(quality) = item.quality {
@@ -70,6 +78,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
             selected_by_default: false,
             supported: true,
             unsupported_reason: None,
+            default_min: Some(quality as f64),
+            default_max: None,
         });
     }
     if let Some(sockets) = &item.sockets {
@@ -80,6 +90,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
                 selected_by_default: false,
                 supported: true,
                 unsupported_reason: None,
+                default_min: Some(count as f64),
+                default_max: None,
             }),
             None => misc.push(FilterCandidate {
                 id: "property:sockets".to_string(),
@@ -89,6 +101,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
                 unsupported_reason: Some(
                     "Socket filters need POE2-specific trade mapping.".to_string(),
                 ),
+                default_min: None,
+                default_max: None,
             }),
         }
     }
@@ -115,6 +129,8 @@ pub fn generate_filter_groups(item: &CapturedItem) -> Vec<FilterGroup> {
                 unsupported_reason: Some(
                     "Modifier stat ID mapping will expand from real POE2 fixtures.".to_string(),
                 ),
+                default_min: None,
+                default_max: None,
             })
             .collect::<Vec<_>>();
 

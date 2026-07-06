@@ -1,30 +1,84 @@
 "use strict";
 
-function pageScriptSource(requestId, token) {
+function pageScriptSource(requestId, request) {
   return `
     (() => {
       const requestId = ${JSON.stringify(requestId)};
-      const token = ${JSON.stringify(token)};
+      const request = ${JSON.stringify(request)};
 
-      fetch("/api/trade2/whisper", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Accept": "*/*",
-          "Content-Type": "application/json",
-          "X-Requested-With": "XMLHttpRequest"
-        },
-        body: JSON.stringify({ token })
-      })
-        .then(async (response) => {
-          const text = await response.text();
-          let payload = null;
-          try {
-            payload = text ? JSON.parse(text) : null;
-          } catch (_) {
-            payload = null;
+      async function readJsonResponse(response) {
+        const text = await response.text();
+        let payload = null;
+        try {
+          payload = text ? JSON.parse(text) : null;
+        } catch (_) {
+          payload = null;
+        }
+
+        return { text, payload };
+      }
+
+      async function resolveToken() {
+        if (request.token) {
+          return request.token;
+        }
+
+        if (!request.fetchUrl || !request.listingId) {
+          throw new Error("TradeTool did not provide a hideout token or fetch URL for this listing.");
+        }
+
+        const response = await fetch(request.fetchUrl, {
+          method: "GET",
+          credentials: "include",
+          headers: {
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest"
           }
+        });
 
+        const { text, payload } = await readJsonResponse(response);
+
+        if (response.status === 401 || response.status === 403) {
+          const error = new Error("Firefox is not logged into pathofexile.com or the session expired.");
+          error.status = response.status;
+          throw error;
+        }
+
+        if (!response.ok) {
+          throw new Error(text || "POE trade listing fetch returned HTTP " + response.status + ".");
+        }
+
+        const listing = payload && Array.isArray(payload.result)
+          ? payload.result.find((entry) => entry && entry.id === request.listingId)
+          : null;
+        const token = listing && listing.listing ? listing.listing.hideout_token : null;
+
+        if (!token) {
+          throw new Error("POE did not return an instant-buyout hideout token for this listing.");
+        }
+
+        return token;
+      }
+
+      async function sendWhisper(token) {
+        const response = await fetch("/api/trade2/whisper", {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Accept": "*/*",
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest"
+          },
+          body: JSON.stringify({ token })
+        });
+
+        const { text, payload } = await readJsonResponse(response);
+        return { response, text, payload };
+      }
+
+      resolveToken()
+        .then(sendWhisper)
+        .then(({ response, text, payload }) => {
           window.postMessage({
             source: "tradetool-poe2-page",
             requestId,
@@ -114,12 +168,16 @@ browser.runtime.onMessage.addListener((message) => {
     return undefined;
   }
 
-  if (!message.token) {
+  if (!message.token && !message.fetchUrl) {
     return Promise.resolve({
       success: false,
-      message: "TradeTool did not provide a hideout token for this listing."
+      message: "TradeTool did not provide a hideout token or fetch URL for this listing."
     });
   }
 
-  return injectTeleportRequest(message.token);
+  return injectTeleportRequest({
+    listingId: message.listingId || "",
+    token: message.token || null,
+    fetchUrl: message.fetchUrl || null
+  });
 });

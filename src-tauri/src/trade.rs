@@ -1,8 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use crate::models::{
-    AppDiagnostic, CapturedItem, TradeListing, TradeListingItem, TradePrice, TradeSearchResponse,
+    AppDiagnostic, CapturedItem, FilterValueOverride, TradeListing, TradeListingItem, TradePrice,
+    TradeSearchResponse,
 };
 use crate::stat_patterns::STAT_PATTERNS;
 use serde::Deserialize;
@@ -35,6 +36,22 @@ pub struct TradeFilterSpec {
     pub selected_by_default: bool,
     pub source_modifier_index: Option<usize>,
     kind: TradeFilterKind,
+}
+
+impl TradeFilterSpec {
+    pub fn default_min(&self) -> Option<f64> {
+        match &self.kind {
+            TradeFilterKind::Stat { value, .. } => *value,
+            TradeFilterKind::Category(_) | TradeFilterKind::ItemType { .. } => None,
+        }
+    }
+
+    pub fn default_max(&self) -> Option<f64> {
+        match &self.kind {
+            TradeFilterKind::Stat { max_value, .. } => *max_value,
+            TradeFilterKind::Category(_) | TradeFilterKind::ItemType { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -83,9 +100,18 @@ pub fn mapped_explicit_modifier_indices(item: &CapturedItem) -> HashSet<usize> {
     indices
 }
 
+#[allow(dead_code)]
 pub fn build_trade_query(
     item: &CapturedItem,
     selected_filter_ids: &[String],
+) -> Result<Value, String> {
+    build_trade_query_with_values(item, selected_filter_ids, &[])
+}
+
+pub fn build_trade_query_with_values(
+    item: &CapturedItem,
+    selected_filter_ids: &[String],
+    selected_filter_values: &[FilterValueOverride],
 ) -> Result<Value, String> {
     validate_selected_filter_ids(item, selected_filter_ids)?;
 
@@ -93,40 +119,43 @@ pub fn build_trade_query(
         .iter()
         .map(String::as_str)
         .collect::<HashSet<_>>();
+    let value_overrides = validated_value_overrides(&selected, selected_filter_values)?;
     let all_specs = all_trade_filter_specs(item);
     let selected_specs = all_specs
         .iter()
         .filter(|spec| selected.contains(spec.id.as_str()))
         .collect::<Vec<_>>();
-    let stat_filters = selected_specs
-        .iter()
-        .filter_map(|spec| match &spec.kind {
+    let mut stat_filters = Vec::new();
+    for spec in &selected_specs {
+        match &spec.kind {
             TradeFilterKind::Stat {
                 stat_id,
                 value,
                 max_value,
             } => {
+                let (value, max_value) =
+                    filter_value_range(spec.id.as_str(), *value, *max_value, &value_overrides)?;
                 let mut filter = json!({
                     "id": stat_id,
                     "disabled": false
                 });
 
                 if let Some(value) = value {
-                    filter["value"]["min"] = stat_value_json(*value);
+                    filter["value"]["min"] = stat_value_json(value);
                 }
                 if let Some(max_value) = max_value {
-                    filter["value"]["max"] = stat_value_json(*max_value);
+                    filter["value"]["max"] = stat_value_json(max_value);
                 }
 
-                Some(filter)
+                stat_filters.push(filter);
             }
-            TradeFilterKind::Category(_) | TradeFilterKind::ItemType { .. } => None,
-        })
-        .collect::<Vec<_>>();
+            TradeFilterKind::Category(_) | TradeFilterKind::ItemType { .. } => {}
+        }
+    }
 
     let mut query = json!({
         "query": {
-            "status": { "option": "any" },
+            "status": { "option": "securable" },
             "stats": []
         },
         "sort": {
@@ -159,20 +188,58 @@ pub fn build_trade_query(
 
     if selected.contains("misc:item_level") {
         if let Some(item_level) = item.item_level {
-            query["query"]["filters"]["misc_filters"]["filters"]["ilvl"]["min"] = json!(item_level);
+            let (min, max) = filter_value_range(
+                "misc:item_level",
+                Some(item_level as f64),
+                None,
+                &value_overrides,
+            )?;
+            if let Some(min) = min {
+                query["query"]["filters"]["misc_filters"]["filters"]["ilvl"]["min"] =
+                    stat_value_json(min);
+            }
+            if let Some(max) = max {
+                query["query"]["filters"]["misc_filters"]["filters"]["ilvl"]["max"] =
+                    stat_value_json(max);
+            }
         }
     }
 
     if selected.contains("property:quality") {
         if let Some(quality) = item.quality {
-            query["query"]["filters"]["misc_filters"]["filters"]["quality"]["min"] = json!(quality);
+            let (min, max) = filter_value_range(
+                "property:quality",
+                Some(quality as f64),
+                None,
+                &value_overrides,
+            )?;
+            if let Some(min) = min {
+                query["query"]["filters"]["misc_filters"]["filters"]["quality"]["min"] =
+                    stat_value_json(min);
+            }
+            if let Some(max) = max {
+                query["query"]["filters"]["misc_filters"]["filters"]["quality"]["max"] =
+                    stat_value_json(max);
+            }
         }
     }
 
     if selected.contains("property:sockets") {
         if let Some(count) = item.sockets.as_deref().and_then(socket_count) {
-            query["query"]["filters"]["equipment_filters"]["filters"]["rune_sockets"]["min"] =
-                json!(count);
+            let (min, max) = filter_value_range(
+                "property:sockets",
+                Some(count as f64),
+                None,
+                &value_overrides,
+            )?;
+            if let Some(min) = min {
+                query["query"]["filters"]["equipment_filters"]["filters"]["rune_sockets"]["min"] =
+                    stat_value_json(min);
+            }
+            if let Some(max) = max {
+                query["query"]["filters"]["equipment_filters"]["filters"]["rune_sockets"]["max"] =
+                    stat_value_json(max);
+            }
             query["query"]["filters"]["equipment_filters"]["disabled"] = json!(false);
         }
     }
@@ -199,9 +266,57 @@ pub fn build_trade_query(
         }
     }
 
-    query["query"]["filters"]["trade_filters"]["filters"] = json!({});
-
     Ok(query)
+}
+
+fn validated_value_overrides<'a>(
+    selected_filter_ids: &HashSet<&str>,
+    selected_filter_values: &'a [FilterValueOverride],
+) -> Result<HashMap<&'a str, &'a FilterValueOverride>, String> {
+    let mut overrides = HashMap::new();
+
+    for override_value in selected_filter_values {
+        if !selected_filter_ids.contains(override_value.id.as_str()) {
+            continue;
+        }
+
+        if let (Some(min), Some(max)) = (override_value.min, override_value.max) {
+            if min > max {
+                return Err(format!(
+                    "Filter {} has a minimum greater than its maximum.",
+                    override_value.id
+                ));
+            }
+        }
+
+        overrides.insert(override_value.id.as_str(), override_value);
+    }
+
+    Ok(overrides)
+}
+
+fn filter_value_range(
+    filter_id: &str,
+    default_min: Option<f64>,
+    default_max: Option<f64>,
+    overrides: &HashMap<&str, &FilterValueOverride>,
+) -> Result<(Option<f64>, Option<f64>), String> {
+    let Some(override_value) = overrides.get(filter_id) else {
+        return Ok((default_min, default_max));
+    };
+
+    if let (Some(min), Some(max)) = (override_value.min, override_value.max) {
+        if min > max {
+            return Err(format!(
+                "Filter {filter_id} has a minimum greater than its maximum."
+            ));
+        }
+    }
+
+    Ok((
+        override_value.min.or(default_min),
+        override_value.max.or(default_max),
+    ))
 }
 
 fn validate_selected_filter_ids(
@@ -310,19 +425,22 @@ pub fn map_fetch_response(response_body: &str) -> Result<Vec<TradeListing>, Stri
                 .listing
                 .hideout_token
                 .filter(|token| !token.trim().is_empty());
+            let price = result.listing.price.and_then(|price| {
+                Some(TradePrice {
+                    price_type: price.price_type,
+                    amount: price.amount?,
+                    currency: price.currency?,
+                })
+            });
+            let is_exact_buyout = price.as_ref().is_some_and(is_exact_buyout_price);
+            let hideout_token = is_exact_buyout.then_some(hideout_token).flatten();
 
             TradeListing {
                 id: result.id,
                 indexed: result.listing.indexed,
-                price: result.listing.price.and_then(|price| {
-                    Some(TradePrice {
-                        price_type: price.price_type,
-                        amount: price.amount?,
-                        currency: price.currency?,
-                    })
-                }),
+                price,
                 account_name: result.listing.account.and_then(|account| account.name),
-                can_teleport: hideout_token.is_some(),
+                can_teleport: is_exact_buyout,
                 hideout_token,
                 item: TradeListingItem {
                     icon: result.item.icon,
@@ -345,13 +463,18 @@ pub fn map_fetch_response(response_body: &str) -> Result<Vec<TradeListing>, Stri
         .collect())
 }
 
+fn is_exact_buyout_price(price: &TradePrice) -> bool {
+    price.price_type.as_deref() == Some("~b/o")
+}
+
 pub async fn search_trade(
     league: &str,
     item: &CapturedItem,
     selected_filter_ids: &[String],
+    selected_filter_values: &[FilterValueOverride],
 ) -> Result<TradeSearchResponse, String> {
     let league = sanitize_league(league)?;
-    let query = build_trade_query(item, selected_filter_ids)?;
+    let query = build_trade_query_with_values(item, selected_filter_ids, selected_filter_values)?;
     let api_url = format!("{TRADE_BASE_URL}/api/trade2/search/poe2/{league}");
 
     let response = reqwest::Client::new()
@@ -410,7 +533,20 @@ pub async fn search_trade(
         fetch_url = Some(url.clone());
 
         match fetch_trade_listings(&url).await {
-            Ok(fetched) => listings = fetched,
+            Ok(fetched) => {
+                let fetched_len = fetched.len();
+                listings = fetched
+                    .into_iter()
+                    .filter(|listing| listing.can_teleport)
+                    .collect();
+
+                if fetched_len > 0 && listings.is_empty() {
+                    warning = Some(
+                        "The first fetched page had no exact-buyout listings available for TP."
+                            .to_string(),
+                    );
+                }
+            }
             Err(error) => {
                 diagnostics.push(AppDiagnostic {
                     code: "listing_fetch_failed".to_string(),
@@ -1221,7 +1357,7 @@ impl FetchMod {
 
 #[cfg(test)]
 mod tests {
-    use crate::models::CapturedItem;
+    use crate::models::{CapturedItem, FilterValueOverride};
     use crate::parser::parse_item_text;
     use crate::trade::{
         build_fetch_url, build_trade_query, format_trade_api_error, is_blocked_or_rate_limited,
@@ -1354,7 +1490,44 @@ Has 2(1-3) Charm Slots";
             .as_array()
             .expect("stats array")
             .is_empty());
-        assert!(query["query"]["filters"]["trade_filters"].is_object());
+        assert_eq!(
+            query["query"]["filters"]["trade_filters"],
+            serde_json::Value::Null
+        );
+    }
+
+    #[test]
+    fn query_builder_applies_selected_filter_value_overrides() {
+        let item = parse_item_text(RARE_BOOTS).expect("boots should parse");
+        let query = super::build_trade_query_with_values(
+            &item,
+            &[
+                "stat:explicit.stat_4052037485:0".to_string(),
+                "stat:explicit.stat_4015621042:1".to_string(),
+            ],
+            &[
+                FilterValueOverride {
+                    id: "stat:explicit.stat_4052037485:0".to_string(),
+                    min: Some(50.0),
+                    max: Some(60.0),
+                },
+                FilterValueOverride {
+                    id: "stat:explicit.stat_4015621042:1".to_string(),
+                    min: None,
+                    max: Some(140.0),
+                },
+            ],
+        )
+        .expect("query should build");
+
+        let filters = query["query"]["stats"][0]["filters"]
+            .as_array()
+            .expect("stat filters");
+
+        assert_eq!(filters[0]["value"]["min"], 50);
+        assert_eq!(filters[0]["value"]["max"], 60);
+        assert_eq!(filters[1]["value"]["min"], 124);
+        assert_eq!(filters[1]["value"]["max"], 140);
     }
 
     #[test]
@@ -1414,7 +1587,7 @@ Has 2(1-3) Charm Slots";
         )
         .expect("query should build");
 
-        assert_eq!(query["query"]["status"]["option"], "any");
+        assert_eq!(query["query"]["status"]["option"], "securable");
         assert_eq!(
             query["query"]["filters"]["type_filters"]["filters"]["category"]["option"],
             "armour.boots"
@@ -1698,7 +1871,7 @@ Has 2(1-3) Charm Slots";
     }
 
     #[test]
-    fn fetch_response_mapper_marks_listing_without_hideout_token_not_teleportable() {
+    fn fetch_response_mapper_marks_exact_buyout_without_token_teleportable_for_bridge_resolution() {
         let response = r#"{
             "result": [{
                 "id": "no-token-listing",
@@ -1722,8 +1895,38 @@ Has 2(1-3) Charm Slots";
 
         let listings = map_fetch_response(response).expect("fetch response should map");
 
-        assert!(!listings[0].can_teleport);
+        assert!(listings[0].can_teleport);
         assert!(listings[0].hideout_token.is_none());
+    }
+
+    #[test]
+    fn fetch_response_mapper_only_marks_exact_buyout_listings_teleportable() {
+        let response = r#"{
+            "result": [
+                {
+                    "id": "exact-buyout",
+                    "listing": {
+                        "price": { "type": "~b/o", "amount": 1, "currency": "exalted" },
+                        "hideout_token": "buyout-token"
+                    },
+                    "item": { "typeLine": "Sapphire", "explicitMods": [], "pseudoMods": [] }
+                },
+                {
+                    "id": "fixed-price",
+                    "listing": {
+                        "price": { "type": "~price", "amount": 1, "currency": "exalted" },
+                        "hideout_token": "fixed-price-token"
+                    },
+                    "item": { "typeLine": "Sapphire", "explicitMods": [], "pseudoMods": [] }
+                }
+            ]
+        }"#;
+
+        let listings = map_fetch_response(response).expect("fetch response should map");
+
+        assert!(listings[0].can_teleport);
+        assert!(!listings[1].can_teleport);
+        assert!(listings[1].hideout_token.is_none());
     }
 
     #[test]

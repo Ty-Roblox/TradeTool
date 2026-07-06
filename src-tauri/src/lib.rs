@@ -33,8 +33,14 @@ async fn search_trade(
     };
 
     let response =
-        trade::search_trade(&request.league, &item, &request.selected_filter_ids).await?;
-    firefox_bridge::replace_listing_tokens(&response.listings);
+        trade::search_trade(
+            &request.league,
+            &item,
+            &request.selected_filter_ids,
+            &request.selected_filter_values,
+        )
+        .await?;
+    firefox_bridge::replace_listing_tokens(&response.listings, response.fetch_url.as_deref());
     Ok(response)
 }
 

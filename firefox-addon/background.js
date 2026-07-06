@@ -55,7 +55,7 @@ async function findPathOfExileTab() {
   );
 }
 
-async function sendTeleportInFirefox(token) {
+async function sendTeleportInFirefox(request) {
   const tab = await findPathOfExileTab();
   if (!tab || tab.id === undefined) {
     return {
@@ -67,7 +67,9 @@ async function sendTeleportInFirefox(token) {
   try {
     return await browser.tabs.sendMessage(tab.id, {
       type: "tradetool:teleport-to-hideout",
-      token
+      listingId: request.listingId,
+      token: request.token || null,
+      fetchUrl: request.fetchUrl || null
     });
   } catch (error) {
     return {
@@ -111,7 +113,7 @@ async function pollOnce() {
 
   const request = await response.json();
   await setBadge("TP", "#d6b36a");
-  const result = await sendTeleportInFirefox(request.token);
+  const result = await sendTeleportInFirefox(request);
   await postTeleportResult(request.requestId, result);
   await setBadge(result.success ? "SENT" : "ERR", result.success ? "#247a59" : "#a83333");
   return POLL_IDLE_MS;

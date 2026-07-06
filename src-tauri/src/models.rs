@@ -46,7 +46,7 @@ pub struct ItemModifier {
     pub text: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FilterGroup {
     pub id: String,
@@ -54,7 +54,7 @@ pub struct FilterGroup {
     pub filters: Vec<FilterCandidate>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FilterCandidate {
     pub id: String,
@@ -62,6 +62,10 @@ pub struct FilterCandidate {
     pub selected_by_default: bool,
     pub supported: bool,
     pub unsupported_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_min: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_max: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -87,6 +91,16 @@ pub struct SearchTradeRequest {
     pub league: String,
     pub raw_text: Option<String>,
     pub selected_filter_ids: Vec<String>,
+    #[serde(default)]
+    pub selected_filter_values: Vec<FilterValueOverride>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterValueOverride {
+    pub id: String,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

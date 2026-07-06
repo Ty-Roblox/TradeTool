@@ -35,6 +35,8 @@
     selectedByDefault: boolean;
     supported: boolean;
     unsupportedReason?: string;
+    defaultMin?: number | null;
+    defaultMax?: number | null;
   };
 
   type FilterGroup = {
@@ -91,6 +93,17 @@
     message: string;
   };
 
+  type FilterValueOverride = {
+    id: string;
+    min?: number;
+    max?: number;
+  };
+
+  type FilterRange = {
+    min: string;
+    max: string;
+  };
+
   type TradePrice = {
     priceType?: string;
     amount: number;
@@ -129,6 +142,7 @@
   let tradeResult = $state<TradeSearchResponse | null>(null);
   let selectedFilterIds = $state<string[]>([]);
   let selectedQuickFilterIds = $state<string[]>([]);
+  let filterRanges = $state<Record<string, FilterRange>>({});
   let activeFilterTab = $state<"item" | "jewels">("jewels");
   let activeJewelId = $state(quickJewels[0]?.id ?? "");
   let quickStatId = $state(quickJewels[0]?.stats[0]?.id ?? "");
@@ -181,6 +195,10 @@
       .flatMap((group) => group.filters)
       .filter((filter) => filter.supported && filter.selectedByDefault)
       .map((filter) => filter.id);
+    filterRanges = {
+      ...quickFilterRanges(),
+      ...rangeDefaultsForFilterGroups(response.filterGroups)
+    };
     captureStatus = status;
     captureError = "";
     searchStatus = "";
@@ -195,6 +213,7 @@
     selectedFilterIds = [];
     tradeResult = null;
     teleportStatuses = {};
+    filterRanges = quickFilterRanges();
     searchStatus = "";
     searchError = "";
   }
@@ -255,7 +274,8 @@
         request: {
           league,
           rawText: capture?.item.rawText ?? "",
-          selectedFilterIds: filterIds
+          selectedFilterIds: filterIds,
+          selectedFilterValues: selectedFilterValues(filterIds)
         }
       });
 
@@ -429,9 +449,16 @@
   }
 
   function toggleFilter(id: string, checked: boolean) {
+    const filter = findCaptureFilter(id);
+
     selectedFilterIds = checked
       ? Array.from(new Set([...selectedFilterIds, id]))
       : selectedFilterIds.filter((selectedId) => selectedId !== id);
+
+    if (checked && filter) {
+      ensureFilterRange(id, filter.defaultMin, filter.defaultMax);
+    }
+
     clearSearchResult();
   }
 
@@ -488,6 +515,7 @@
         quickStatFilterId(jewel.id, quickStatId)
       ])
     );
+    ensureFilterRange(quickStatFilterId(jewel.id, quickStatId), quickStatDefaultMin(jewel.id, quickStatId));
     clearSearchResult();
   }
 
@@ -495,10 +523,16 @@
     const parts = id.split(":");
     const jewelId = parts[2];
 
+    const removedIds =
+      parts[3] === "base"
+        ? selectedQuickFilterIds.filter((filterId) => filterId.startsWith(`quick:jewel:${jewelId}:`))
+        : [id];
+
     selectedQuickFilterIds =
       parts[3] === "base"
         ? selectedQuickFilterIds.filter((filterId) => !filterId.startsWith(`quick:jewel:${jewelId}:`))
         : selectedQuickFilterIds.filter((filterId) => filterId !== id);
+    removeFilterRanges(removedIds);
 
     clearSearchResult();
   }
@@ -528,6 +562,101 @@
     tradeResult = null;
     searchStatus = "";
     searchError = "";
+  }
+
+  function rangeDefaultsForFilterGroups(groups: FilterGroup[]) {
+    const ranges: Record<string, FilterRange> = {};
+
+    for (const filter of groups.flatMap((group) => group.filters)) {
+      if (hasRangeDefaults(filter)) {
+        ranges[filter.id] = rangeFromDefaults(filter.defaultMin, filter.defaultMax);
+      }
+    }
+
+    return ranges;
+  }
+
+  function quickFilterRanges() {
+    return Object.fromEntries(
+      Object.entries(filterRanges).filter(([id]) => id.startsWith("quick:jewel:"))
+    );
+  }
+
+  function hasRangeDefaults(filter: FilterCandidate) {
+    return filter.supported && (filter.defaultMin != null || filter.defaultMax != null);
+  }
+
+  function rangeFromDefaults(min?: number | null, max?: number | null): FilterRange {
+    return {
+      min: formatRangeValue(min),
+      max: formatRangeValue(max)
+    };
+  }
+
+  function formatRangeValue(value?: number | null) {
+    return value == null || !Number.isFinite(value) ? "" : String(value);
+  }
+
+  function ensureFilterRange(id: string, min?: number | null, max?: number | null) {
+    if (filterRanges[id]) {
+      return;
+    }
+
+    filterRanges = {
+      ...filterRanges,
+      [id]: rangeFromDefaults(min, max)
+    };
+  }
+
+  function updateFilterRange(id: string, side: keyof FilterRange, value: string) {
+    const current = filterRanges[id] ?? rangeFromDefaults();
+    filterRanges = {
+      ...filterRanges,
+      [id]: {
+        ...current,
+        [side]: value
+      }
+    };
+    clearSearchResult();
+  }
+
+  function removeFilterRanges(ids: string[]) {
+    const remove = new Set(ids);
+    filterRanges = Object.fromEntries(
+      Object.entries(filterRanges).filter(([id]) => !remove.has(id))
+    );
+  }
+
+  function findCaptureFilter(id: string) {
+    return capture?.filterGroups
+      .flatMap((group) => group.filters)
+      .find((filter) => filter.id === id);
+  }
+
+  function quickStatDefaultMin(jewelId: string, statId: string) {
+    return quickJewels
+      .find((jewel) => jewel.id === jewelId)
+      ?.stats.find((stat) => stat.id === statId)?.min;
+  }
+
+  function selectedFilterValues(filterIds: string[]): FilterValueOverride[] {
+    return filterIds
+      .filter((id) => filterRanges[id])
+      .map((id) => ({
+        id,
+        min: parseRangeNumber(filterRanges[id].min),
+        max: parseRangeNumber(filterRanges[id].max)
+      }));
+  }
+
+  function parseRangeNumber(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : undefined;
   }
 
   function updateLeague(event: Event) {
@@ -745,10 +874,34 @@
           {#if selectedQuickFilterIds.length}
             <div class="quick-chip-list" aria-label="Selected quick filters">
               {#each selectedQuickFilterIds as id}
-                <button class="quick-chip" type="button" onclick={() => removeQuickFilter(id)}>
+                <div class="quick-chip">
                   <span>{quickFilterLabel(id)}</span>
-                  <strong>Remove</strong>
-                </button>
+                  {#if filterRanges[id]}
+                    <div class="range-controls compact-range" aria-label={`${quickFilterLabel(id)} range`}>
+                      <label>
+                        <span>Min</span>
+                        <input
+                          type="number"
+                          inputmode="decimal"
+                          value={filterRanges[id].min}
+                          oninput={(event) =>
+                            updateFilterRange(id, "min", (event.currentTarget as HTMLInputElement).value)}
+                        />
+                      </label>
+                      <label>
+                        <span>Max</span>
+                        <input
+                          type="number"
+                          inputmode="decimal"
+                          value={filterRanges[id].max}
+                          oninput={(event) =>
+                            updateFilterRange(id, "max", (event.currentTarget as HTMLInputElement).value)}
+                        />
+                      </label>
+                    </div>
+                  {/if}
+                  <button type="button" onclick={() => removeQuickFilter(id)}>Remove</button>
+                </div>
               {/each}
             </div>
           {/if}
@@ -805,19 +958,54 @@
                 <span>{group.filters.length}</span>
               </div>
               {#each group.filters as filter}
-                <label class:unsupported={!filter.supported} class="filter-row">
+                <div class:unsupported={!filter.supported} class="filter-row">
                   <input
                     type="checkbox"
                     checked={isSelected(filter.id)}
                     disabled={!filter.supported || searching}
+                    aria-label={filter.label}
                     onchange={(event) =>
                       toggleFilter(filter.id, (event.currentTarget as HTMLInputElement).checked)}
                   />
-                  <span>{filter.label}</span>
+                  <div class="filter-content">
+                    <span>{filter.label}</span>
+                    {#if filter.supported && isSelected(filter.id) && filterRanges[filter.id]}
+                      <div class="range-controls" aria-label={`${filter.label} range`}>
+                        <label>
+                          <span>Min</span>
+                          <input
+                            type="number"
+                            inputmode="decimal"
+                            value={filterRanges[filter.id].min}
+                            oninput={(event) =>
+                              updateFilterRange(
+                                filter.id,
+                                "min",
+                                (event.currentTarget as HTMLInputElement).value
+                              )}
+                          />
+                        </label>
+                        <label>
+                          <span>Max</span>
+                          <input
+                            type="number"
+                            inputmode="decimal"
+                            value={filterRanges[filter.id].max}
+                            oninput={(event) =>
+                              updateFilterRange(
+                                filter.id,
+                                "max",
+                                (event.currentTarget as HTMLInputElement).value
+                              )}
+                          />
+                        </label>
+                      </div>
+                    {/if}
+                  </div>
                   {#if !filter.supported}
                     <small>{filter.unsupportedReason}</small>
                   {/if}
-                </label>
+                </div>
               {/each}
             </section>
           {/each}
@@ -1559,22 +1747,29 @@
   }
 
   .quick-chip {
-    display: inline-flex;
+    display: flex;
     max-width: 100%;
-    min-height: 34px;
+    min-height: 38px;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
-    padding: 0 9px;
-    border-color: rgba(45, 159, 137, 0.46);
+    padding: 7px 9px;
+    border: 1px solid rgba(45, 159, 137, 0.46);
+    border-radius: 8px;
     color: #d9fff5;
     background: rgba(45, 159, 137, 0.14);
     font-size: 0.78rem;
     font-weight: 800;
   }
 
-  .quick-chip strong {
+  .quick-chip > button {
+    min-height: 28px;
+    padding: 0 7px;
+    border-color: rgba(45, 159, 137, 0.46);
     color: #8ee6d4;
+    background: rgba(10, 16, 18, 0.5);
     font-size: 0.72rem;
+    font-weight: 800;
   }
 
   .heading-pills {
@@ -1663,17 +1858,61 @@
     background: var(--surface-subtle);
   }
 
-  .filter-row input {
+  .filter-row > input[type="checkbox"] {
     width: 16px;
     height: 16px;
     margin: 2px 0 0;
     accent-color: var(--primary);
   }
 
-  .filter-row span {
+  .filter-content {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .filter-row span,
+  .filter-content span {
     min-width: 0;
     overflow-wrap: anywhere;
     line-height: 1.35;
+  }
+
+  .range-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(86px, 120px));
+    gap: 8px;
+    max-width: 260px;
+  }
+
+  .range-controls label {
+    display: grid;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 0.7rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .range-controls input {
+    min-width: 0;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    color: var(--ink);
+    background: var(--field);
+    outline: none;
+  }
+
+  .range-controls input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(214, 179, 106, 0.18);
+  }
+
+  .compact-range {
+    grid-template-columns: repeat(2, 82px);
+    max-width: none;
   }
 
   .filter-row small {
